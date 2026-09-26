@@ -1,0 +1,441 @@
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import CyberHand
+import CyberHand.Core
+
+// Left settings column: profile bar + Communication / Control / Motor / Joints / Macros / Visual.
+Card {
+    id: root
+    property var hand: Core.hand
+    readonly property var bench: hand.joints[hand.benchJoint]
+
+    TextPrompt { id: prompt }
+    ConfirmDialog { id: confirm }
+    MacroEditor { id: macroEditor }
+
+    ColumnLayout {
+        anchors.fill: parent
+        spacing: 0
+
+        // ---- profile bar -------------------------------------------------
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 36
+            Layout.leftMargin: 6
+            Layout.rightMargin: 6
+            spacing: 2
+            IconButton { iconPath: Icons.folder; tip: qsTr("Mở thư mục cấu hình"); onClicked: Core.config.openFolder() }
+            FlatCombo {
+                id: profileCombo
+                Layout.fillWidth: true
+                Layout.minimumWidth: 90
+                model: Core.config.profiles
+                currentIndex: Core.config.profiles.indexOf(Core.config.current)
+                onActivated: (i) => Core.config.load(textAt(i))
+            }
+            IconButton { iconPath: Icons.save; tip: qsTr("Lưu cấu hình"); onClicked: Core.config.save() }
+            IconButton {
+                iconPath: Icons.copy
+                tip: qsTr("Lưu thành cấu hình mới")
+                onClicked: {
+                    prompt.accepted.disconnect(root.saveAsNew)
+                    prompt.accepted.connect(root.saveAsNew)
+                    prompt.ask(qsTr("Tên cấu hình mới"), Core.config.current + "_copy")
+                }
+            }
+            IconButton {
+                iconPath: Icons.trash
+                tip: qsTr("Xóa cấu hình")
+                enabled: Core.config.profiles.length > 1
+                onClicked: confirm.ask(qsTr("Xóa cấu hình \"%1\"?").arg(Core.config.current),
+                                       function() { Core.config.remove(Core.config.current); if (Core.config.profiles.length) Core.config.load(Core.config.profiles[0]) },
+                                       qsTr("Xóa"))
+            }
+            Item { Layout.preferredWidth: 4 }
+            FlatButton {
+                Layout.preferredWidth: 104
+                accent: !Core.link.connected
+                text: Core.link.connected ? qsTr("Disconnect") : qsTr("Connect")
+                iconPath: Icons.plug
+                onClicked: Core.link.toggle()
+            }
+        }
+
+        Flickable {
+            id: flick
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            contentHeight: col.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: FlatScrollBar {}
+
+            ColumnLayout {
+                id: col
+                width: flick.width
+                spacing: 1
+
+                // ---- Communication ----------------------------------------
+                Section {
+                    title: qsTr("Communication")
+                    FormRow {
+                        label: qsTr("COM Port")
+                        FlatCombo {
+                            id: portCombo
+                            Layout.fillWidth: true
+                            editable: true
+                            model: Core.link.ports
+                            enabled: !Core.link.connected
+                            Component.onCompleted: editText = Core.link.portName
+                            Connections {
+                                target: Core.link
+                                function onPortNameChanged() { if (portCombo.editText !== Core.link.portName) portCombo.editText = Core.link.portName }
+                            }
+                            onActivated: (i) => Core.link.portName = textAt(i)
+                            onAccepted: Core.link.portName = editText
+                            onEditTextChanged: if (!Core.link.connected && editText.length) Core.link.portName = editText
+                        }
+                        IconButton { iconPath: Icons.refresh; tip: qsTr("Quét lại cổng"); onClicked: Core.link.refreshPorts() }
+                    }
+                    FormRow {
+                        label: qsTr("Baud")
+                        FlatCombo {
+                            id: baudCombo
+                            Layout.fillWidth: true
+                            editable: true
+                            model: ["9600", "57600", "115200", "230400", "460800", "921600"]
+                            Component.onCompleted: editText = "" + Core.link.baudRate
+                            onActivated: (i) => Core.link.baudRate = parseInt(textAt(i))
+                            onAccepted: Core.link.baudRate = parseInt(editText)
+                        }
+                    }
+                    FormRow {
+                        label: qsTr("Line ending")
+                        FlatCombo {
+                            Layout.fillWidth: true
+                            model: ["LF  \\n", "CR  \\r", "CR+LF"]
+                            currentIndex: Core.link.lineEnding
+                            onActivated: (i) => Core.link.lineEnding = i
+                        }
+                    }
+                    FormRow {
+                        label: qsTr("Protocol")
+                        FlatCombo {
+                            Layout.fillWidth: true
+                            model: Core.ctrl.protocolNames
+                            currentIndex: Core.ctrl.protocol
+                            onActivated: (i) => Core.ctrl.protocol = i
+                        }
+                    }
+                    FormRow {
+                        label: qsTr("Bench joint")
+                        visible: Core.ctrl.protocol === 0
+                        FlatCombo {
+                            Layout.fillWidth: true
+                            model: root.hand.names
+                            currentIndex: root.hand.benchJoint
+                            onActivated: (i) => root.hand.benchJoint = i
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+                        Led { on: Core.link.connected && Core.link.lastLineAgeMs >= 0 && Core.link.lastLineAgeMs < 1500 }
+                        TextLabel {
+                            Layout.fillWidth: true
+                            secondary: true
+                            font.pixelSize: Theme.fontSmall
+                            color: Core.link.errorString.length && !Core.link.connected ? Theme.liveRed : Theme.textSecondary
+                            text: {
+                                if (!Core.link.connected)
+                                    return Core.link.errorString.length ? Core.link.errorString : qsTr("Chưa kết nối")
+                                var age = Core.link.lastLineAgeMs
+                                return qsTr("RX %1 B/s · %2 dòng/s · dòng cuối %3")
+                                    .arg(Math.round(Core.link.rxBytesPerSec))
+                                    .arg(Core.link.linesPerSec.toFixed(1))
+                                    .arg(age < 0 ? "—" : (age > 9999 ? ">10 s" : age + " ms"))
+                            }
+                        }
+                    }
+                }
+
+                // ---- Control ------------------------------------------------
+                Section {
+                    title: qsTr("Control")
+                    FormRow {
+                        label: qsTr("Motion Send Rate")
+                        NumberField {
+                            Layout.preferredWidth: 90
+                            value: Core.player.sendRate; decimals: 0; from: 1; to: 200; unit: "Hz"
+                            onCommitted: (v) => { Core.player.sendRate = v; Core.stream.sendRate = v; Core.gamepad.sendRate = v }
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Speed Percentage")
+                        NumberField {
+                            Layout.preferredWidth: 90
+                            value: Core.ctrl.dutyLimit; decimals: 0; from: 0; to: 100; unit: "%"
+                            onCommitted: (v) => Core.ctrl.dutyLimit = v
+                        }
+                        FlatButton { text: qsTr("Update"); tip: qsTr("Gửi  x <pct>"); onClicked: Core.ctrl.applyDutyLimit() }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Position Sample Rate")
+                        NumberField {
+                            Layout.preferredWidth: 90
+                            value: Core.ctrl.logRate; decimals: 0; from: 0; to: 100; unit: "Hz"
+                            onCommitted: (v) => Core.ctrl.logRate = v
+                        }
+                        FlatButton { text: qsTr("Update"); tip: qsTr("Gửi  l <hz>"); onClicked: Core.ctrl.applyLogRate() }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Soft Start")
+                        FlatCheck { checked: Core.player.softStart; onToggled: Core.player.softStart = checked }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Soft Stop")
+                        FlatCheck { checked: Core.player.softStop; onToggled: Core.player.softStop = checked }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Current Limit")
+                        NumberField {
+                            Layout.preferredWidth: 90
+                            value: Core.telemetry.currentLimitMa; decimals: 0; from: 1; to: 5000; unit: "mA"
+                            onCommitted: (v) => Core.telemetry.currentLimitMa = v
+                        }
+                        FlatCheck {
+                            text: qsTr("Tự tắt")
+                            checked: Core.telemetry.autoDisable
+                            onToggled: Core.telemetry.autoDisable = checked
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Vượt ngưỡng thì dừng phát và gửi  d")
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+
+                // ---- Motor (bench) ----------------------------------------
+                Section {
+                    title: qsTr("Motor")
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 3
+                        columnSpacing: 4
+                        rowSpacing: 4
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Enable"); iconPath: Icons.power; tip: "e"; onClicked: Core.ctrl.enable() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Disable"); danger: true; tip: "d"; onClicked: Core.ctrl.disable() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Home"); iconPath: Icons.home; tip: "H [pct] [mA]"; onClicked: Core.ctrl.home() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Zero"); tip: "z"; onClicked: Core.ctrl.zero() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Clear fault"); tip: "c"; onClicked: Core.ctrl.clearFault() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Status"); tip: "s"; onClicked: Core.ctrl.status() }
+                    }
+                    FormRow {
+                        label: qsTr("Home duty / dòng")
+                        NumberField {
+                            Layout.preferredWidth: 70
+                            value: Core.ctrl.homePct; decimals: 0; from: 0; to: 100; unit: "%"
+                            onCommitted: (v) => Core.ctrl.homePct = v
+                        }
+                        NumberField {
+                            Layout.preferredWidth: 80
+                            value: Core.ctrl.homeMa; decimals: 0; from: 0; to: 5000; unit: "mA"
+                            onCommitted: (v) => Core.ctrl.homeMa = v
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    // joint angle (PID)
+                    FormRow {
+                        label: qsTr("Góc khớp") + (root.bench ? " · " + root.bench.key : "")
+                        FlatSlider {
+                            id: angleSlider
+                            Layout.fillWidth: true
+                            from: root.bench ? root.bench.minDeg : 0
+                            to: root.bench ? root.bench.maxDeg : 90
+                            stepSize: 0.5
+                            fillColor: Theme.jointColor(root.hand.benchJoint)
+                            value: root.bench ? root.bench.commandDeg : 0
+                            onMoved: if (liveCheck.checked) liveTimer.restart()
+                            onPressedChanged: if (!pressed) Core.ctrl.moveJoint(root.hand.benchJoint, value)
+                            Timer { id: liveTimer; interval: 60; onTriggered: Core.ctrl.moveJoint(root.hand.benchJoint, angleSlider.value) }
+                        }
+                        NumberField {
+                            Layout.preferredWidth: 64
+                            value: angleSlider.value; decimals: 1; from: 0; to: 180; unit: "°"
+                            onCommitted: (v) => Core.ctrl.moveJoint(root.hand.benchJoint, v)
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Theme.labelWidth + 6
+                        FlatCheck { id: liveCheck; text: qsTr("Gửi khi kéo"); checked: false }
+                        Item { Layout.fillWidth: true }
+                        FlatButton { text: "0°"; onClicked: Core.ctrl.moveJoint(root.hand.benchJoint, 0) }
+                        FlatButton { text: "45°"; onClicked: Core.ctrl.moveJoint(root.hand.benchJoint, 45) }
+                        FlatButton { text: "90°"; onClicked: Core.ctrl.moveJoint(root.hand.benchJoint, 90) }
+                    }
+                    // open loop duty
+                    FormRow {
+                        label: qsTr("Duty vòng hở")
+                        FlatSlider {
+                            id: dutySlider
+                            Layout.fillWidth: true
+                            from: -100; to: 100; stepSize: 1
+                            centered: true
+                            value: Core.telemetry.hasData ? Core.telemetry.duty : 0
+                            onPressedChanged: if (!pressed) Core.ctrl.setDuty(value)
+                        }
+                        ValueBox { Layout.preferredWidth: 50; text: Math.round(dutySlider.value) + "%" }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Theme.labelWidth + 6
+                        spacing: 4
+                        FlatButton { text: "−5"; tip: "-"; onClicked: Core.ctrl.dutyDown() }
+                        FlatButton { text: "0"; tip: "0"; onClicked: Core.ctrl.stopOpenLoop() }
+                        FlatButton { text: "+5"; tip: "+"; onClicked: Core.ctrl.dutyUp() }
+                        FlatButton { text: qsTr("Đảo"); tip: "r"; onClicked: Core.ctrl.reverse() }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Tốc độ khớp")
+                        NumberField {
+                            id: velField
+                            Layout.preferredWidth: 90
+                            value: Core.ctrl.velocity; decimals: 1; from: -500; to: 500; unit: "°/s"
+                            onCommitted: (v) => Core.ctrl.velocity = v
+                        }
+                        FlatButton { text: qsTr("Chạy"); tip: "v <deg/s>"; onClicked: Core.ctrl.runVelocity(Core.ctrl.velocity) }
+                        FlatButton { text: qsTr("Giữ"); tip: "v 0"; onClicked: Core.ctrl.hold() }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("PID kp / ki / kd")
+                        NumberField { Layout.fillWidth: true; value: Core.ctrl.kp; decimals: 6; from: 0; to: 100; onCommitted: (v) => Core.ctrl.kp = v }
+                        NumberField { Layout.fillWidth: true; value: Core.ctrl.ki; decimals: 6; from: 0; to: 100; onCommitted: (v) => Core.ctrl.ki = v }
+                        NumberField { Layout.fillWidth: true; value: Core.ctrl.kd; decimals: 7; from: 0; to: 100; onCommitted: (v) => Core.ctrl.kd = v }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Layout.leftMargin: Theme.labelWidth + 6
+                        FlatButton { text: qsTr("Apply PID"); tip: "k kp ki kd"; onClicked: Core.ctrl.applyPid() }
+                        Item { Layout.fillWidth: true }
+                        FlatButton { text: qsTr("Help"); tip: "h"; onClicked: Core.ctrl.help() }
+                    }
+                }
+
+                // ---- Poses --------------------------------------------------
+                Section {
+                    title: qsTr("Poses")
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 4
+                        Repeater {
+                            model: Core.poses
+                            FlatButton { text: model.name; onClicked: Core.poses.apply(index) }
+                        }
+                        FlatButton {
+                            iconPath: Icons.plus
+                            tip: qsTr("Lưu tư thế hiện tại thành pose")
+                            onClicked: {
+                                prompt.accepted.disconnect(root.savePose)
+                                prompt.accepted.connect(root.savePose)
+                                prompt.ask(qsTr("Tên pose"), "Pose " + (Core.poses.count + 1))
+                            }
+                        }
+                    }
+                }
+
+                // ---- Joints ---------------------------------------------------
+                Section {
+                    title: qsTr("Joints")
+                    expanded: false
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+                        TextLabel { text: ""; Layout.preferredWidth: 26 }
+                        TextLabel { text: qsTr("Tên"); secondary: true; Layout.fillWidth: true; font.pixelSize: Theme.fontSmall }
+                        TextLabel { text: qsTr("cnt/90°"); secondary: true; Layout.preferredWidth: 58; font.pixelSize: Theme.fontSmall }
+                        TextLabel { text: qsTr("min°"); secondary: true; Layout.preferredWidth: 44; font.pixelSize: Theme.fontSmall }
+                        TextLabel { text: qsTr("max°"); secondary: true; Layout.preferredWidth: 44; font.pixelSize: Theme.fontSmall }
+                    }
+                    Repeater {
+                        model: root.hand.joints
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+                            Rectangle { width: 8; height: 8; radius: 4; color: Theme.jointColor(index) }
+                            TextLabel { text: modelData.key; Layout.preferredWidth: 14; font.pixelSize: Theme.fontSmall; secondary: true }
+                            FlatField { Layout.fillWidth: true; text: modelData.name; onEditingFinished: modelData.name = text }
+                            NumberField { Layout.preferredWidth: 58; value: modelData.countsPer90; decimals: 1; from: -100000; to: 100000; onCommitted: (v) => modelData.countsPer90 = v }
+                            NumberField { Layout.preferredWidth: 44; value: modelData.minDeg; decimals: 0; from: -180; to: 180; onCommitted: (v) => modelData.minDeg = v }
+                            NumberField { Layout.preferredWidth: 44; value: modelData.maxDeg; decimals: 0; from: -180; to: 180; onCommitted: (v) => modelData.maxDeg = v }
+                        }
+                    }
+                }
+
+                // ---- Macros ---------------------------------------------------
+                Section {
+                    title: qsTr("Macros")
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 4
+                        FlatCombo {
+                            id: macroCombo
+                            Layout.fillWidth: true
+                            model: Core.macros
+                            textRole: "name"
+                        }
+                        IconButton { iconPath: Icons.pencil; tip: qsTr("Sửa"); onClicked: macroEditor.edit(macroCombo.currentIndex) }
+                        IconButton { iconPath: Icons.plus; tip: qsTr("Macro mới"); onClicked: macroEditor.edit(-1) }
+                        IconButton {
+                            iconPath: Icons.trash; tip: qsTr("Xóa")
+                            enabled: macroCombo.currentIndex >= 0
+                            onClicked: confirm.ask(qsTr("Xóa macro \"%1\"?").arg(macroCombo.currentText), function() { Core.macros.remove(macroCombo.currentIndex) }, qsTr("Xóa"))
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        FlatButton {
+                            text: Core.macros.running ? qsTr("Stop") : qsTr("Run")
+                            iconPath: Core.macros.running ? Icons.stop : Icons.play
+                            iconFilled: true
+                            accent: !Core.macros.running
+                            onClicked: Core.macros.running ? Core.macros.stop() : Core.macros.run(macroCombo.currentIndex)
+                        }
+                        TextLabel {
+                            Layout.fillWidth: true
+                            secondary: true
+                            font.pixelSize: Theme.fontSmall
+                            text: Core.macros.running ? Core.macros.runningName + " · " + qsTr("dòng %1").arg(Core.macros.currentLine) + " · " + Core.macros.status : Core.macros.status
+                        }
+                    }
+                }
+
+                // ---- Visual ---------------------------------------------------
+                Section {
+                    title: qsTr("Visual")
+                    FormRow {
+                        label: qsTr("Bóng mờ đích (tgt)")
+                        FlatCheck { checked: Core.ui.showGhost !== false; onToggled: Core.setUiValue("showGhost", checked) }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Lưới sàn")
+                        FlatCheck { checked: Core.ui.showFloor !== false; onToggled: Core.setUiValue("showFloor", checked) }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+                Item { Layout.preferredHeight: 8 }
+            }
+        }
+    }
+
+    function saveAsNew(name) { Core.config.saveAs(name) }
+    function savePose(name) { Core.poses.capture(name); Core.saveNow() }
+}

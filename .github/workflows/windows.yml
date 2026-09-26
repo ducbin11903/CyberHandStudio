@@ -1,0 +1,120 @@
+name: Windows build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            zip
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-qt6-base
+            mingw-w64-ucrt-x86_64-qt6-declarative
+            mingw-w64-ucrt-x86_64-qt6-quick3d
+            mingw-w64-ucrt-x86_64-qt6-shadertools
+            mingw-w64-ucrt-x86_64-qt6-serialport
+            mingw-w64-ucrt-x86_64-qt6-svg
+            mingw-w64-ucrt-x86_64-SDL2
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j4
+
+      - name: Unit tests
+        run: cd build && QT_QPA_PLATFORM=offscreen ctest --output-on-failure
+
+      - name: Deploy (windeployqt + MinGW runtime)
+        run: |
+          mkdir -p dist
+          cp build/CyberHandStudio.exe dist/
+          windeployqt6 --release --no-translations --qmldir qml --dir dist dist/CyberHandStudio.exe
+          # copy every non-Qt DLL the exe and plugins need from the UCRT64 prefix
+          for pass in 1 2 3 4 5 6; do
+            find dist -name '*.exe' -o -name '*.dll' | while read f; do
+              ldd "$f" 2>/dev/null | awk '{print $3}' | grep -i '/ucrt64/bin/' || true
+            done | sort -u > deps.txt
+            added=0
+            while read d; do
+              b=$(basename "$d")
+              if [ ! -f "dist/$b" ]; then cp "$d" dist/; added=1; fi
+            done < deps.txt
+            [ $added -eq 0 ] && break
+          done
+          mkdir -p dist/examples dist/tools
+          cp assets/examples/* dist/examples/
+          cp tools/*.py dist/tools/
+          cp README.md dist/README.md
+          cp assets/fonts/OFL.txt dist/FONT-LICENSE-OFL.txt
+          ls dist | head -100
+          du -sh dist
+
+      - name: Smoke test (start app, screenshot, quit)
+        continue-on-error: true
+        run: |
+          cd dist
+          QT_FORCE_STDERR_LOGGING=1 timeout 60 ./CyberHandStudio.exe --config-dir ./_ci_cfg --screenshot ../smoke.png --screenshot-delay 6000 > ../smoke.log 2>&1
+          echo "exit=$?" >> ../smoke.log
+          rm -rf ./_ci_cfg
+          cat ../smoke.log
+          ls -la ../smoke.png
+
+      - name: Zip
+        run: |
+          cd dist
+          zip -qr ../CyberHandStudio-win64.zip .
+          cd ..
+          ls -la CyberHandStudio-win64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CyberHandStudio-win64
+          path: CyberHandStudio-win64.zip
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-test
+          path: |
+            smoke.png
+            smoke.log
+          if-no-files-found: ignore
+
+      - name: Publish "latest" pre-release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest CyberHandStudio-win64.zip \
+            --prerelease --title "Latest build (main)" \
+            --notes "Tự động build từ commit ${GITHUB_SHA::7}. Tải zip, giải nén, chạy CyberHandStudio.exe."
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" CyberHandStudio-win64.zip --title "${GITHUB_REF_NAME}" --notes "CyberHand Studio ${GITHUB_REF_NAME}"

@@ -1,0 +1,359 @@
+#include "PlotItem.h"
+
+#include <QPainter>
+#include <QPainterPath>
+#include <cmath>
+
+static const QColor kFallback[] = {
+    QColor("#9E6362"), QColor("#A8886C"), QColor("#A9AB6B"), QColor("#67A585"),
+    QColor("#6383A1"), QColor("#8466A8"), QColor("#A5617F"), QColor("#5FA3A0"),
+    QColor("#9C8F5E"), QColor("#7B9A5A"),
+};
+
+PlotItem::PlotItem(QQuickItem *parent)
+    : QQuickPaintedItem(parent)
+{
+    setAntialiasing(true);
+    setOpaquePainting(true);
+    m_throttle.setInterval(33);
+    m_throttle.setSingleShot(true);
+    connect(&m_throttle, &QTimer::timeout, this, [this]() {
+        if (m_dirty) {
+            m_dirty = false;
+            update();
+        }
+    });
+}
+
+void PlotItem::setSource(PlotSource *s)
+{
+    if (m_source == s)
+        return;
+    if (m_source)
+        disconnect(m_source, nullptr, this, nullptr);
+    m_source = s;
+    if (m_source) {
+        connect(m_source, &PlotSource::dataChanged, this, &PlotItem::onSourceData);
+        connect(m_source, &PlotSource::channelsChanged, this, &PlotItem::onSourceData);
+    }
+    emit sourceChanged();
+    onSourceData();
+}
+
+void PlotItem::setXMin(double v) { if (v != m_xMin) { m_xMin = v; emit rangeChanged(); scheduleUpdate(); } }
+void PlotItem::setXMax(double v) { if (v != m_xMax) { m_xMax = v; emit rangeChanged(); scheduleUpdate(); } }
+void PlotItem::setYMin(double v) { if (v != m_yMin) { m_yMin = v; emit rangeChanged(); scheduleUpdate(); } }
+void PlotItem::setYMax(double v) { if (v != m_yMax) { m_yMax = v; emit rangeChanged(); scheduleUpdate(); } }
+
+void PlotItem::setFollowLatest(bool f)
+{
+    m_follow = f;
+    emit styleChanged();
+    onSourceData();
+}
+
+void PlotItem::setWindow(double w)
+{
+    m_window = qMax(0.1, w);
+    emit styleChanged();
+    onSourceData();
+}
+
+void PlotItem::setAutoY(bool a)
+{
+    m_autoY = a;
+    emit styleChanged();
+    onSourceData();
+}
+
+void PlotItem::setColors(const QVariantList &c)
+{
+    m_colors = c;
+    emit styleChanged();
+    scheduleUpdate();
+}
+
+void PlotItem::setHiddenChannels(const QStringList &h)
+{
+    m_hidden = h;
+    emit styleChanged();
+    onSourceData();
+}
+
+void PlotItem::setOnlyChannels(const QStringList &o)
+{
+    m_only = o;
+    emit styleChanged();
+    onSourceData();
+}
+
+QColor PlotItem::channelColor(int ch) const
+{
+    if (ch >= 0 && ch < m_colors.size()) {
+        const QColor c = m_colors[ch].value<QColor>();
+        if (c.isValid())
+            return c;
+    }
+    const int n = int(sizeof(kFallback) / sizeof(kFallback[0]));
+    return kFallback[((ch % n) + n) % n];
+}
+
+bool PlotItem::channelShown(int ch) const
+{
+    if (!m_source)
+        return false;
+    const QString name = m_source->channelName(ch);
+    if (!m_only.isEmpty() && !m_only.contains(name))
+        return false;
+    return !m_hidden.contains(name);
+}
+
+void PlotItem::fitX()
+{
+    if (!m_source)
+        return;
+    double lo = qInf(), hi = -qInf();
+    for (int ch = 0; ch < m_source->channelCount(); ++ch) {
+        const int n = m_source->pointCount(ch);
+        if (n == 0)
+            continue;
+        lo = qMin(lo, m_source->point(ch, 0).x());
+        hi = qMax(hi, m_source->point(ch, n - 1).x());
+    }
+    if (std::isfinite(lo) && std::isfinite(hi) && hi > lo) {
+        m_xMin = lo;
+        m_xMax = hi;
+        emit rangeChanged();
+        scheduleUpdate();
+    }
+}
+
+void PlotItem::onSourceData()
+{
+    if (m_source && m_follow) {
+        double latest = -qInf();
+        for (int ch = 0; ch < m_source->channelCount(); ++ch) {
+            const int n = m_source->pointCount(ch);
+            if (n > 0)
+                latest = qMax(latest, m_source->point(ch, n - 1).x());
+        }
+        if (std::isfinite(latest)) {
+            const double hi = qMax(latest, m_window);
+            const double lo = hi - m_window;
+            if (hi != m_xMax || lo != m_xMin) {
+                m_xMax = hi;
+                m_xMin = lo;
+                emit rangeChanged();
+            }
+        }
+    }
+    if (m_source && m_autoY) {
+        double lo = qInf(), hi = -qInf();
+        for (int ch = 0; ch < m_source->channelCount(); ++ch) {
+            if (!channelShown(ch))
+                continue;
+            const int n = m_source->pointCount(ch);
+            for (int i = m_source->lowerBound(ch, m_xMin); i < n; ++i) {
+                const QPointF p = m_source->point(ch, i);
+                if (p.x() > m_xMax)
+                    break;
+                if (!std::isfinite(p.y()))
+                    continue;
+                lo = qMin(lo, p.y());
+                hi = qMax(hi, p.y());
+            }
+        }
+        if (std::isfinite(lo) && std::isfinite(hi)) {
+            if (hi - lo < 1e-9) {
+                lo -= 1;
+                hi += 1;
+            }
+            const double pad = (hi - lo) * 0.08;
+            if (lo - pad != m_yMin || hi + pad != m_yMax) {
+                m_yMin = lo - pad;
+                m_yMax = hi + pad;
+                emit rangeChanged();
+            }
+        }
+    }
+    scheduleUpdate();
+}
+
+void PlotItem::scheduleUpdate()
+{
+    m_dirty = true;
+    if (!m_throttle.isActive())
+        m_throttle.start();
+}
+
+void PlotItem::geometryChange(const QRectF &newGeometry, const QRectF &oldGeometry)
+{
+    QQuickPaintedItem::geometryChange(newGeometry, oldGeometry);
+    emit layoutChanged();
+    update();
+}
+
+double PlotItem::xToPixel(double x) const
+{
+    const double span = m_xMax - m_xMin;
+    if (span <= 0)
+        return m_left;
+    return m_left + (x - m_xMin) / span * plotWidth();
+}
+
+double PlotItem::pixelToX(double px) const
+{
+    return m_xMin + (px - m_left) / plotWidth() * (m_xMax - m_xMin);
+}
+
+double PlotItem::yToPixel(double y) const
+{
+    const double span = m_yMax - m_yMin;
+    if (span <= 0)
+        return m_top + plotHeight();
+    return m_top + plotHeight() - (y - m_yMin) / span * plotHeight();
+}
+
+static QString fmtTick(double v, double step)
+{
+    int decimals = 0;
+    while (decimals < 3 && std::fabs(step * std::pow(10.0, decimals) - std::round(step * std::pow(10.0, decimals))) > 1e-6)
+        ++decimals;
+    QString s = QString::number(v, 'f', decimals);
+    if (s.contains(QLatin1Char('.'))) {
+        while (s.endsWith(QLatin1Char('0')))
+            s.chop(1);
+        if (s.endsWith(QLatin1Char('.')))
+            s.chop(1);
+    }
+    if (s == QLatin1String("-0"))
+        s = QStringLiteral("0");
+    return s;
+}
+
+void PlotItem::paint(QPainter *p)
+{
+    const QRectF all(0, 0, width(), height());
+    p->fillRect(all, m_bg);
+    p->setRenderHint(QPainter::Antialiasing, true);
+    p->setRenderHint(QPainter::TextAntialiasing, true);
+
+    QFont f(QStringLiteral("Noto Sans"));
+    f.setPixelSize(10);
+    p->setFont(f);
+
+    const QRectF area(m_left, m_top, plotWidth(), plotHeight());
+
+    // grid + tick labels
+    QColor gridC = m_grid;
+    gridC.setAlphaF(0.45);
+    QPen gridPen(gridC, 1);
+    p->setPen(gridPen);
+    for (int i = 0; i <= m_yDiv; ++i) {
+        const double y = m_yMin + (m_yMax - m_yMin) * i / m_yDiv;
+        const double py = std::round(yToPixel(y)) + 0.5;
+        p->setPen(gridPen);
+        p->drawLine(QPointF(area.left(), py), QPointF(area.right(), py));
+        p->setPen(m_text);
+        p->drawText(QRectF(0, py - 8, m_left - 8, 16), Qt::AlignRight | Qt::AlignVCenter,
+                    fmtTick(y, (m_yMax - m_yMin) / m_yDiv));
+    }
+    for (int i = 0; i <= m_xDiv; ++i) {
+        const double x = m_xMin + (m_xMax - m_xMin) * i / m_xDiv;
+        const double px = std::round(xToPixel(x)) + 0.5;
+        p->setPen(gridPen);
+        p->drawLine(QPointF(px, area.top()), QPointF(px, area.bottom()));
+        p->setPen(m_text);
+        p->drawText(QRectF(px - 30, area.bottom() + 4, 60, 14), Qt::AlignHCenter | Qt::AlignTop,
+                    fmtTick(x, (m_xMax - m_xMin) / m_xDiv));
+    }
+    if (!m_xLabel.isEmpty()) {
+        p->setPen(m_text);
+        p->drawText(QRectF(area.left(), height() - 14, area.width(), 14), Qt::AlignHCenter | Qt::AlignVCenter, m_xLabel);
+    }
+    if (!m_yLabel.isEmpty()) {
+        p->save();
+        p->translate(9, area.center().y());
+        p->rotate(-90);
+        p->setPen(m_text);
+        p->drawText(QRectF(-60, -7, 120, 14), Qt::AlignCenter, m_yLabel);
+        p->restore();
+    }
+
+    if (!m_source)
+        return;
+
+    p->setClipRect(area.adjusted(-1, -2, 1, 2));
+    const double w = area.width();
+    for (int ch = 0; ch < m_source->channelCount(); ++ch) {
+        if (!channelShown(ch))
+            continue;
+        const int n = m_source->pointCount(ch);
+        if (n == 0)
+            continue;
+        int i0 = qMax(0, m_source->lowerBound(ch, m_xMin) - 1);
+        QPen pen(channelColor(ch), m_lineWidth);
+        pen.setJoinStyle(Qt::RoundJoin);
+        pen.setCapStyle(Qt::RoundCap);
+        p->setPen(pen);
+
+        QPainterPath path;
+        bool penDown = false;
+        const int visible = n - i0;
+        const bool decimate = visible > int(w * 3);
+        if (!decimate) {
+            for (int i = i0; i < n; ++i) {
+                const QPointF d = m_source->point(ch, i);
+                if (!std::isfinite(d.y())) {
+                    penDown = false;
+                    continue;
+                }
+                const QPointF px(xToPixel(d.x()), yToPixel(d.y()));
+                if (!penDown) {
+                    path.moveTo(px);
+                    penDown = true;
+                } else {
+                    path.lineTo(px);
+                }
+                if (d.x() > m_xMax)
+                    break;
+            }
+        } else {
+            // min/max per pixel column
+            int col = -1;
+            double cmin = 0, cmax = 0, clast = 0;
+            auto flush = [&](int c) {
+                if (c < 0)
+                    return;
+                const double px = area.left() + c + 0.5;
+                if (!penDown) {
+                    path.moveTo(px, yToPixel(cmax));
+                    penDown = true;
+                } else {
+                    path.lineTo(px, yToPixel(cmax));
+                }
+                path.lineTo(px, yToPixel(cmin));
+                path.lineTo(px, yToPixel(clast));
+            };
+            for (int i = i0; i < n; ++i) {
+                const QPointF d = m_source->point(ch, i);
+                if (!std::isfinite(d.y()))
+                    continue;
+                const int c = int(xToPixel(d.x()) - area.left());
+                if (c != col) {
+                    flush(col);
+                    col = c;
+                    cmin = cmax = clast = d.y();
+                } else {
+                    cmin = qMin(cmin, d.y());
+                    cmax = qMax(cmax, d.y());
+                    clast = d.y();
+                }
+                if (d.x() > m_xMax)
+                    break;
+            }
+            flush(col);
+        }
+        p->drawPath(path);
+    }
+}

@@ -1,0 +1,8 @@
+build/
+build-*/
+dist/
+*.user
+*.autosave
+__pycache__/
+.vscode/
+.idea/

@@ -1,0 +1,91 @@
+{
+  "format": "cyberhand-timeline-1",
+  "name": "finger_opposition",
+  "length": 6,
+  "clips": [
+    {
+      "track": "T2",
+      "start": 0,
+      "duration": 1,
+      "target": 70,
+      "easing": "smooth"
+    },
+    {
+      "track": "T2",
+      "start": 3.6,
+      "duration": 1.2,
+      "target": 0,
+      "easing": "smooth"
+    },
+    {
+      "track": "T1",
+      "start": 0.4,
+      "duration": 1,
+      "target": 45,
+      "easing": "smooth"
+    },
+    {
+      "track": "T1",
+      "start": 3.4,
+      "duration": 1.2,
+      "target": 0,
+      "easing": "easeout"
+    },
+    {
+      "track": "I",
+      "start": 0.8,
+      "duration": 1.2,
+      "target": 55,
+      "easing": "smooth"
+    },
+    {
+      "track": "I",
+      "start": 3.2,
+      "duration": 1.2,
+      "target": 0,
+      "easing": "smooth"
+    },
+    {
+      "track": "M",
+      "start": 1.0,
+      "duration": 1.4,
+      "target": 80,
+      "easing": "linear"
+    },
+    {
+      "track": "M",
+      "start": 3.8,
+      "duration": 1.2,
+      "target": 0,
+      "easing": "linear"
+    },
+    {
+      "track": "R",
+      "start": 1.2,
+      "duration": 1.4,
+      "target": 85,
+      "easing": "linear"
+    },
+    {
+      "track": "R",
+      "start": 4.0,
+      "duration": 1.2,
+      "target": 0,
+      "easing": "linear"
+    },
+    {
+      "track": "P",
+      "start": 1.4,
+      "duration": 1.4,
+      "target": 90,
+      "easing": "easein"
+    },
+    {
+      "track": "P",
+      "start": 4.2,
+      "duration": 1.2,
+      "target": 0,
+      "easing": "easeout"
+    }
+  ]
+}
