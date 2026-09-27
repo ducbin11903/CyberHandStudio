@@ -106,7 +106,9 @@ Item {
             // ---- time header + ruler ------------------------------------
             RowLayout {
                 Layout.fillWidth: true
+                Layout.fillHeight: false
                 Layout.preferredHeight: 30
+                Layout.maximumHeight: 30
                 spacing: 0
                 Item {
                     Layout.preferredWidth: root.labelWidth
@@ -167,7 +169,9 @@ Item {
             // ---- tracks -----------------------------------------------------
             RowLayout {
                 Layout.fillWidth: true
+                Layout.fillHeight: false
                 Layout.preferredHeight: root.rowHeight * Core.hand.count
+                Layout.maximumHeight: root.rowHeight * Core.hand.count + 10
                 spacing: 0
 
                 // labels

@@ -99,7 +99,10 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     connect(m_gamepad, &GamepadInput::commandRequested, m_ctrl, &HandController::send);
     connect(m_poses, &PoseLibrary::applyRequested, this, [this](const QVariantList &values, const QString &name) {
         m_console->info(tr("Pose %1").arg(name));
+        m_player->pause();
         m_ctrl->applyPose(values);
+        if (m_gamepad->enabled())
+            m_gamepad->syncFromHand();
     });
     connect(m_llm, &LlmClient::trajectoryReady, this, [this](const QString &csv, const QString &prompt) {
         if (m_textTraj->fromCsvText(csv)) {

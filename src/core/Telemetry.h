@@ -105,5 +105,6 @@ private:
     bool m_autoDisable = false;
     bool m_overLimit = false;
     int m_count = 0;
+    double m_lastMultiT = -1;
     QElapsedTimer m_rateClock;
 };

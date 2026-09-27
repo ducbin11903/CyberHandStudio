@@ -12,6 +12,8 @@ Cập nhật: 2026-09-27
 - Stream UDP (JSON/CSV, hiệu chuẩn, mirror, Bars/Graph), Controller (SDL2 + mô phỏng chuột), AI tạo quỹ đạo.
 - Cấu hình dạng profile JSON, poses, macros.
 - Firmware giả lập `tools/fw_sim.py`, unit test lõi, CI Windows (GitHub Actions → release "latest").
+- Đã thử với fw_sim: home → PID → đồ thị; phát CSV bench; console lỗi/OK; 6 khớp + Stream mirror (`G q1..q6`); tay cầm mô phỏng; AI qua API giả.
+- Bảng Status theo "Khớp chính" cả khi log 6 khớp.
 
 ## Giả định cần Duc xác nhận
 
@@ -20,6 +22,8 @@ Cập nhật: 2026-09-27
 - Hệ số khớp PIP/DIP của mô hình 3D (0.8 / 0.4 so với MCP) chỉ để hiển thị.
 
 ## Việc tiếp theo
+
+- Duc thử trên bench H562 thật (COM8), báo lỗi/ảnh chụp.
 
 - Mesh bàn tay thật từ CAD (glTF) thay khối.
 - Firmware MCB: log `q1..q6`, lệnh `g <j> <độ>` / `G ...`, USB CDC.

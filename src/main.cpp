@@ -20,8 +20,10 @@ static void loadFonts()
         QStringLiteral(":/assets/fonts/NotoSans-Bold.ttf"),
         QStringLiteral(":/assets/fonts/NotoSansMono-Regular.ttf"),
     };
-    for (const QString &f : files)
-        QFontDatabase::addApplicationFont(f);
+    for (const QString &f : files) {
+        if (QFontDatabase::addApplicationFont(f) < 0)
+            qWarning() << "font not loaded:" << f;
+    }
 
     QFont font(QStringLiteral("Noto Sans"));
     font.setPixelSize(12);

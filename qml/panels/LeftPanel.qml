@@ -129,8 +129,7 @@ Card {
                         }
                     }
                     FormRow {
-                        label: qsTr("Bench joint")
-                        visible: Core.ctrl.protocol === 0
+                        label: qsTr("Khớp chính")
                         FlatCombo {
                             Layout.fillWidth: true
                             model: root.hand.names

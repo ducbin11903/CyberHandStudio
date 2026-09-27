@@ -56,6 +56,7 @@ void Telemetry::reset()
 {
     m_hasData = false;
     m_multi = false;
+    m_lastMultiT = -1;
     m_fields.clear();
     m_homed = -1;
     m_peak = 0;
@@ -123,6 +124,18 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
             }
         }
         m_iMa = maxI;
+        // Status panel follows the selected ("main") joint
+        const int b = m_hand->benchJoint();
+        if (!qIsNaN(q[b])) {
+            const double prev = m_pos;
+            m_pos = q[b];
+            m_tgt = qIsNaN(tg[b]) ? q[b] : tg[b];
+            if (m_lastMultiT >= 0 && t > m_lastMultiT)
+                m_vel = (m_pos - prev) / (t - m_lastMultiT);
+            m_lastMultiT = t;
+            if (!qIsNaN(cur[b]))
+                m_iMa = cur[b];
+        }
     } else if (names.contains(QLatin1String("pos"))) {
         m_multi = false;
         Joint *j = m_hand->joint(m_hand->benchJoint());

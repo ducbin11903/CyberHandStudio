@@ -147,6 +147,12 @@ void GamepadInput::setEnabled(bool e)
     emit enabledChanged();
 }
 
+void GamepadInput::syncFromHand()
+{
+    m_cmd = m_hand->commandVector();
+    m_dirty = false;
+}
+
 void GamepadInput::setSendRate(double r)
 {
     m_rate = qBound(1.0, r, 200.0);

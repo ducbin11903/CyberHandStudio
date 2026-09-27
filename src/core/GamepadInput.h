@@ -58,6 +58,8 @@ public:
     Q_INVOKABLE void setGain(int row, double gain);
     Q_INVOKABLE void setInvert(int row, bool inv);
     Q_INVOKABLE void resetMapping();
+    // Continue Motion inputs from the hand's current command (after a pose jump).
+    Q_INVOKABLE void syncFromHand();
     // Simulated input (UI testing without a controller): value -1..1 or 0/1.
     Q_INVOKABLE void simulate(const QString &input, double value);
 
