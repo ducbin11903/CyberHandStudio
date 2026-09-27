@@ -14,7 +14,12 @@ ComboBox {
 
     delegate: ItemDelegate {
         width: ListView.view ? ListView.view.width : control.width
-        height: 24
+        height: 26
+        padding: 0
+        topPadding: 0
+        bottomPadding: 0
+        leftPadding: 0
+        rightPadding: 0
         highlighted: control.highlightedIndex === index
         contentItem: Text {
             text: control.textRole ? (Array.isArray(control.model) ? modelData[control.textRole] : model[control.textRole]) : modelData
