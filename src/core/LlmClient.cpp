@@ -8,10 +8,20 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QRegularExpression>
+#include <QSettings>
 
 LlmClient::LlmClient(HandModel *hand, QObject *parent)
     : QObject(parent), m_hand(hand)
 {
+    // the key lives in per-user settings, never in shareable profile files
+    m_key = QSettings().value(QStringLiteral("llm/apiKey")).toString();
+}
+
+void LlmClient::setApiKey(const QString &k)
+{
+    m_key = k.trimmed();
+    QSettings().setValue(QStringLiteral("llm/apiKey"), m_key);
+    emit settingsChanged();
 }
 
 void LlmClient::setProvider(int p)
@@ -171,7 +181,7 @@ QString LlmClient::extractCsv(const QString &reply)
 QJsonObject LlmClient::toJson() const
 {
     return {{QStringLiteral("provider"), m_provider}, {QStringLiteral("endpoint"), m_endpoint},
-            {QStringLiteral("model"), m_model}, {QStringLiteral("apiKey"), m_key}};
+            {QStringLiteral("model"), m_model}};
 }
 
 void LlmClient::fromJson(const QJsonObject &o)
@@ -179,6 +189,7 @@ void LlmClient::fromJson(const QJsonObject &o)
     m_provider = o.value(QStringLiteral("provider")).toInt(m_provider);
     m_endpoint = o.value(QStringLiteral("endpoint")).toString(m_endpoint);
     m_model = o.value(QStringLiteral("model")).toString(m_model);
-    m_key = o.value(QStringLiteral("apiKey")).toString(m_key);
+    if (o.contains(QStringLiteral("apiKey")) && m_key.isEmpty())
+        setApiKey(o.value(QStringLiteral("apiKey")).toString()); // migrate old profiles
     emit settingsChanged();
 }

@@ -34,7 +34,7 @@ public:
     QString model() const { return m_model; }
     void setModel(const QString &m) { m_model = m.trimmed(); emit settingsChanged(); }
     QString apiKey() const { return m_key; }
-    void setApiKey(const QString &k) { m_key = k.trimmed(); emit settingsChanged(); }
+    void setApiKey(const QString &k);
     bool busy() const { return m_reply != nullptr; }
     QString lastError() const { return m_error; }
     QString lastReply() const { return m_lastReply; }
