@@ -62,6 +62,10 @@ jobs:
             done < deps.txt
             [ $added -eq 0 ] && break
           done
+          # MSYS2 Qt looks for QML/plugins under share/qt6 unless told otherwise
+          printf '[Paths]\nPrefix = .\nPlugins = .\nQmlImports = qml\nQml2Imports = qml\n' > dist/qt.conf
+          cat dist/qt.conf
+          ls dist/qml || true
           mkdir -p dist/examples dist/tools
           cp assets/examples/* dist/examples/
           cp tools/*.py dist/tools/
@@ -71,14 +75,13 @@ jobs:
           du -sh dist
 
       - name: Smoke test (start app, screenshot, quit)
-        continue-on-error: true
         run: |
           cd dist
           QT_FORCE_STDERR_LOGGING=1 timeout 60 ./CyberHandStudio.exe --config-dir ./_ci_cfg --screenshot ../smoke.png --screenshot-delay 6000 > ../smoke.log 2>&1
           echo "exit=$?" >> ../smoke.log
           rm -rf ./_ci_cfg
           cat ../smoke.log
-          ls -la ../smoke.png
+          test -s ../smoke.png
 
       - name: Publish smoke result to branch ci-smoke
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'

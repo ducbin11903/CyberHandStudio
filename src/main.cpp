@@ -64,6 +64,8 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/"));
+    // deployed layout (windeployqt): <app>/qml next to the exe
+    engine.addImportPath(QCoreApplication::applicationDirPath() + QStringLiteral("/qml"));
     engine.rootContext()->setContextProperty(QStringLiteral("StartMode"), args.value(modeOpt));
     engine.load(QUrl(QStringLiteral("qrc:/CyberHand/qml/Main.qml")));
     if (engine.rootObjects().isEmpty())
