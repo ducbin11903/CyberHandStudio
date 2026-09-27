@@ -13,6 +13,8 @@ Item {
     property var hidden: []
     property bool aiOpen: false
     property real zoom: 1.0
+    readonly property real viewSpan: zoom <= 1.001 ? Math.max(0.5, traj.duration) : Math.max(0.5, traj.duration / zoom)
+    readonly property real viewMin: zoom <= 1.001 ? 0 : Math.max(0, Math.min(traj.duration - viewSpan, player.position - viewSpan / 2))
 
     property Component toolbar: Component {
         RowLayout {
@@ -40,7 +42,7 @@ Item {
             }
             VSep {}
             TransportBar { player: root.player }
-            VSep {}
+            Item { Layout.fillWidth: true }
             IconButton { iconPath: Icons.fit; tip: qsTr("Vừa khung"); onClicked: root.zoom = 1.0 }
             IconButton { iconPath: Icons.minusCircle; tip: qsTr("Thu nhỏ"); onClicked: root.zoom = Math.max(1, root.zoom / 1.5) }
             FlatSlider {
@@ -107,9 +109,8 @@ Item {
                     yMax: 90
                     yDivisions: 6
                     // zoom keeps the playhead in view
-                    readonly property real span: Math.max(0.5, root.traj.duration / root.zoom)
-                    xMin: root.zoom <= 1.001 ? 0 : Math.max(0, Math.min(root.traj.duration - span, root.player.position - span / 2))
-                    xMax: xMin + (root.zoom <= 1.001 ? Math.max(0.5, root.traj.duration) : span)
+                    xMin: root.viewMin
+                    xMax: root.viewMin + root.viewSpan
                 }
                 // playhead
                 Rectangle {

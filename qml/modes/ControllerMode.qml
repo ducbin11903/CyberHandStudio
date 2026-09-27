@@ -38,6 +38,7 @@ Item {
                 NumberField { Layout.preferredWidth: 60; value: root.gp.deadzone; decimals: 2; from: 0; to: 0.9; onCommitted: (x) => root.gp.deadzone = x }
             }
             FlatButton { text: qsTr("Mặc định"); onClicked: root.gp.resetMapping() }
+            Item { Layout.fillWidth: true }
         }
     }
 

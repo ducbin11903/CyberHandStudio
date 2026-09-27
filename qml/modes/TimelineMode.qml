@@ -36,7 +36,7 @@ Item {
             IconButton { iconPath: Icons.hash; checkable: true; checked: root.snap; tip: qsTr("Bắt lưới 0.1 s"); onToggled: root.snap = checked }
             VSep {}
             TransportBar { player: root.player }
-            VSep {}
+            Item { Layout.fillWidth: true }
             IconButton { iconPath: Icons.fit; tip: qsTr("Vừa khung"); onClicked: root.zoom = 1 }
             IconButton { iconPath: Icons.minusCircle; onClicked: root.zoom = Math.max(1, root.zoom / 1.5) }
             FlatSlider { Layout.preferredWidth: 90; from: 1; to: 12; value: root.zoom; onMoved: root.zoom = value }

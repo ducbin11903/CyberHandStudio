@@ -5,9 +5,11 @@
 #include <QIcon>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQmlExpression>
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QTimer>
+#include <QDebug>
 
 #include "core/AppCore.h"
 
@@ -51,7 +53,8 @@ int main(int argc, char *argv[])
     QCommandLineOption shotDelayOpt(QStringLiteral("screenshot-delay"), QStringLiteral("Delay before screenshot (ms)"), QStringLiteral("ms"), QStringLiteral("2500"));
     QCommandLineOption scriptOpt(QStringLiteral("run-macro"), QStringLiteral("Run this macro text at start (lines separated by ;)"), QStringLiteral("text"));
     QCommandLineOption playOpt(QStringLiteral("play"), QStringLiteral("Load a trajectory CSV and play it"), QStringLiteral("file"));
-    args.addOptions({portOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt});
+    QCommandLineOption evalOpt(QStringLiteral("eval"), QStringLiteral("Evaluate a QML/JS expression after start (repeatable), e.g. \"Core.stream.start()\""), QStringLiteral("js"));
+    args.addOptions({portOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt});
     args.process(app);
 
     AppCore core(args.value(configDirOpt));
@@ -75,6 +78,20 @@ int main(int argc, char *argv[])
     if (args.isSet(playOpt)) {
         const QString file = args.value(playOpt);
         QTimer::singleShot(400, &core, [&core, file]() { core.playFile(file); });
+    }
+
+    if (args.isSet(evalOpt)) {
+        QObject *rootObj = engine.rootObjects().first();
+        const QStringList exprs = args.values(evalOpt);
+        QTimer::singleShot(500, rootObj, [rootObj, exprs]() {
+            for (const QString &e : exprs) {
+                QQmlExpression expr(qmlContext(rootObj), rootObj, e);
+                bool undef = false;
+                expr.evaluate(&undef);
+                if (expr.hasError())
+                    qWarning() << "eval error:" << expr.error().toString();
+            }
+        });
     }
 
     if (args.isSet(shotOpt)) {

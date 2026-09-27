@@ -40,6 +40,7 @@ Item {
                 muted: true
                 text: qsTr("(%1 lệnh stream ẩn)").arg(root.con.hiddenStreamed)
             }
+            Item { Layout.fillWidth: true }
         }
     }
 

@@ -217,7 +217,7 @@ double PlotItem::yToPixel(double y) const
 static QString fmtTick(double v, double step)
 {
     int decimals = 0;
-    while (decimals < 3 && std::fabs(step * std::pow(10.0, decimals) - std::round(step * std::pow(10.0, decimals))) > 1e-6)
+    while (decimals < 2 && std::fabs(step * std::pow(10.0, decimals) - std::round(step * std::pow(10.0, decimals))) > 1e-6)
         ++decimals;
     QString s = QString::number(v, 'f', decimals);
     if (s.contains(QLatin1Char('.'))) {

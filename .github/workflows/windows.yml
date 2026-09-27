@@ -80,6 +80,20 @@ jobs:
           cat ../smoke.log
           ls -la ../smoke.png
 
+      - name: Publish smoke result to branch ci-smoke
+        if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          mkdir -p /tmp/smoke && cp smoke.png smoke.log /tmp/smoke/ 2>/dev/null || true
+          ls /tmp/smoke
+          cd /tmp/smoke
+          git init -q -b ci-smoke
+          git config user.name "ci"
+          git config user.email "ci@users.noreply.github.com"
+          echo "${GITHUB_SHA}" > sha.txt
+          git add -A && git commit -qm "smoke ${GITHUB_SHA::7}"
+          git push -qf "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-smoke
+
       - name: Zip
         run: |
           cd dist

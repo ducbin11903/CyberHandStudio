@@ -34,6 +34,7 @@ Item {
                 text: root.st.lastError
                 color: Theme.liveRed
             }
+            Item { Layout.fillWidth: true }
         }
     }
 
