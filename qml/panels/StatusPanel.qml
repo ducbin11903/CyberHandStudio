@@ -14,8 +14,18 @@ Card {
     function f1(v) { return (v === undefined || isNaN(v)) ? "—" : Number(v).toFixed(1) }
     function f0(v) { return (v === undefined || isNaN(v)) ? "—" : Math.round(v) }
 
-    ColumnLayout {
+    Flickable {
+        id: sflick
         anchors.fill: parent
+        contentHeight: scol.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: FlatScrollBar {}
+
+    ColumnLayout {
+        id: scol
+        width: sflick.width
+        height: Math.max(sflick.height, implicitHeight)
         spacing: 0
 
         SectionHeader {
@@ -219,9 +229,8 @@ Card {
                     ValueBox {
                         text: Math.round(root.tel.peakMa)
                         MouseArea { anchors.fill: parent; onClicked: root.tel.resetPeak(); cursorShape: Qt.PointingHandCursor }
-                        ToolTip.visible: peakHover.hovered
-                        ToolTip.text: qsTr("Bấm để reset")
                         HoverHandler { id: peakHover }
+                        Tip { visible: peakHover.hovered; text: qsTr("Bấm để reset") }
                     }
                 }
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.divider }
@@ -246,4 +255,5 @@ Card {
             }
         }
     }
+}
 }

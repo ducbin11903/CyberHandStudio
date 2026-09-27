@@ -2,16 +2,17 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
+import QtQuick.Window
 import CyberHand
 import CyberHand.Core
 
 ApplicationWindow {
     id: win
     visible: true
-    width: 1500
-    height: 940
-    minimumWidth: 1180
-    minimumHeight: 720
+    width: Math.min(1500, Screen.desktopAvailableWidth - 40)
+    height: Math.min(940, Screen.desktopAvailableHeight - 60)
+    minimumWidth: 1100
+    minimumHeight: 640
     title: "CyberHand Studio " + Core.version + (Core.config.current.length ? " — " + Core.config.current : "")
     color: Theme.bgWindow
     font.family: Theme.fontFamily
@@ -95,6 +96,8 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        if (Screen.desktopAvailableWidth < 1600 || Screen.desktopAvailableHeight < 1000)
+            win.showMaximized()
         if (StartMode && StartMode.length)
             Core.activeMode = StartMode
         else if (Core.ui.mode)

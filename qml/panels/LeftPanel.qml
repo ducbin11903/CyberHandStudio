@@ -212,8 +212,7 @@ Card {
                             text: qsTr("Tự tắt")
                             checked: Core.telemetry.autoDisable
                             onToggled: Core.telemetry.autoDisable = checked
-                            ToolTip.visible: hovered
-                            ToolTip.text: qsTr("Vượt ngưỡng thì dừng phát và gửi  d")
+                            Tip { visible: parent.hovered; text: qsTr("Vượt ngưỡng thì dừng phát và gửi  d") }
                         }
                         Item { Layout.fillWidth: true }
                     }

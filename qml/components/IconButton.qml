@@ -15,9 +15,7 @@ AbstractButton {
     focusPolicy: Qt.NoFocus
     opacity: enabled ? 1 : 0.35
 
-    ToolTip.visible: tip.length > 0 && hovered
-    ToolTip.text: tip
-    ToolTip.delay: 500
+    Tip { visible: control.tip.length > 0 && control.hovered; text: control.tip }
 
     background: Rectangle {
         radius: Theme.radiusSmall
