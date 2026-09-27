@@ -23,6 +23,14 @@ void Joint::setCountsPer90(double c)
     emit configChanged();
 }
 
+void Joint::setCountsPerRev(double c)
+{
+    if (c <= 0 || c == m_cpr)
+        return;
+    m_cpr = c;
+    emit configChanged();
+}
+
 void Joint::setMinDeg(double v)
 {
     if (v == m_min)
@@ -99,6 +107,7 @@ QJsonObject Joint::toJson() const
         {QStringLiteral("key"), m_key},
         {QStringLiteral("name"), m_name},
         {QStringLiteral("countsPer90"), m_cnt90},
+        {QStringLiteral("countsPerRev"), m_cpr},
         {QStringLiteral("minDeg"), m_min},
         {QStringLiteral("maxDeg"), m_max},
         {QStringLiteral("enabled"), m_enabled},
@@ -112,6 +121,9 @@ void Joint::fromJson(const QJsonObject &o)
     m_cnt90 = o.value(QStringLiteral("countsPer90")).toDouble(m_cnt90);
     if (m_cnt90 == 0)
         m_cnt90 = 937;
+    m_cpr = o.value(QStringLiteral("countsPerRev")).toDouble(m_cpr);
+    if (m_cpr <= 0)
+        m_cpr = 28000;
     m_min = o.value(QStringLiteral("minDeg")).toDouble(m_min);
     m_max = o.value(QStringLiteral("maxDeg")).toDouble(m_max);
     m_enabled = o.value(QStringLiteral("enabled")).toBool(m_enabled);

@@ -35,6 +35,7 @@ class Telemetry : public QObject
     Q_PROPERTY(QString firmwareId READ firmwareId NOTIFY firmwareIdChanged)
     Q_PROPERTY(double peakMa READ peakMa NOTIFY updated)
     Q_PROPERTY(double velCps READ velCps NOTIFY updated)
+    Q_PROPERTY(double outputRpm READ outputRpm NOTIFY updated)
     Q_PROPERTY(bool diagLow READ diagLow NOTIFY updated)
     Q_PROPERTY(bool noMotion READ noMotion NOTIFY updated)
     Q_PROPERTY(double currentLimitMa READ currentLimitMa WRITE setCurrentLimitMa NOTIFY limitChanged)
@@ -61,6 +62,8 @@ public:
     // velocity from position change over ~0.5 s (the firmware `vel` is a 1 kHz
     // filtered difference and jumps by ~100 cnt/s on a single-count jitter)
     double velCps() const { return m_velPos; }
+    // gearbox output shaft speed from the same position-based velocity
+    double outputRpm() const;
     // DIAG pin low while the driver is enabled (firmware may ignore it: USE_DIAG 0)
     bool diagLow() const { return m_hasDiag && m_en && m_diag == 0; }
     // duty applied but the encoder does not move

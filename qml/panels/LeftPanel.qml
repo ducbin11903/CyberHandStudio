@@ -359,6 +359,7 @@ Card {
                         TextLabel { text: ""; Layout.preferredWidth: 26 }
                         TextLabel { text: qsTr("Tên"); secondary: true; Layout.fillWidth: true; font.pixelSize: Theme.fontSmall }
                         TextLabel { text: qsTr("cnt/90°"); secondary: true; Layout.preferredWidth: 58; font.pixelSize: Theme.fontSmall }
+                        TextLabel { text: qsTr("cnt/vòng"); secondary: true; Layout.preferredWidth: 62; font.pixelSize: Theme.fontSmall }
                         TextLabel { text: qsTr("min°"); secondary: true; Layout.preferredWidth: 44; font.pixelSize: Theme.fontSmall }
                         TextLabel { text: qsTr("max°"); secondary: true; Layout.preferredWidth: 44; font.pixelSize: Theme.fontSmall }
                     }
@@ -371,6 +372,7 @@ Card {
                             TextLabel { text: modelData.key; Layout.preferredWidth: 14; font.pixelSize: Theme.fontSmall; secondary: true }
                             FlatField { Layout.fillWidth: true; text: modelData.name; onEditingFinished: modelData.name = text }
                             NumberField { Layout.preferredWidth: 58; value: modelData.countsPer90; decimals: 1; from: -100000; to: 100000; onCommitted: (v) => modelData.countsPer90 = v }
+                            NumberField { Layout.preferredWidth: 62; value: modelData.countsPerRev; decimals: 0; from: 1; to: 10000000; onCommitted: (v) => modelData.countsPerRev = v }
                             NumberField { Layout.preferredWidth: 44; value: modelData.minDeg; decimals: 0; from: -180; to: 180; onCommitted: (v) => modelData.minDeg = v }
                             NumberField { Layout.preferredWidth: 44; value: modelData.maxDeg; decimals: 0; from: -180; to: 180; onCommitted: (v) => modelData.maxDeg = v }
                         }

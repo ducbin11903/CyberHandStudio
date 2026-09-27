@@ -99,9 +99,9 @@ Card {
                 valueColor: Math.abs(root.tel.errorDeg) > 5 ? Theme.warnAmber : Theme.textStrong
             }
             Readout {
-                title: qsTr("Velocity")
+                title: qsTr("Velocity (khớp)")
                 value: root.live ? root.f0(root.tel.velDeg) : "—"
-                sub: "°/s"
+                sub: root.live ? "°/s · " + Number(root.tel.outputRpm).toFixed(1) + " RPM" : "°/s"
             }
         }
 

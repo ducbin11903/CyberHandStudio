@@ -13,6 +13,7 @@ class Joint : public QObject
     Q_PROPERTY(QString key READ key CONSTANT)
     Q_PROPERTY(QString name READ name WRITE setName NOTIFY configChanged)
     Q_PROPERTY(double countsPer90 READ countsPer90 WRITE setCountsPer90 NOTIFY configChanged)
+    Q_PROPERTY(double countsPerRev READ countsPerRev WRITE setCountsPerRev NOTIFY configChanged)
     Q_PROPERTY(double minDeg READ minDeg WRITE setMinDeg NOTIFY configChanged)
     Q_PROPERTY(double maxDeg READ maxDeg WRITE setMaxDeg NOTIFY configChanged)
     Q_PROPERTY(bool enabled READ enabled WRITE setEnabled NOTIFY configChanged)
@@ -33,6 +34,9 @@ public:
     void setName(const QString &n);
     double countsPer90() const { return m_cnt90; }
     void setCountsPer90(double c);
+    // encoder counts per revolution of the gearbox output shaft (PPR x 4 x ratio)
+    double countsPerRev() const { return m_cpr; }
+    void setCountsPerRev(double c);
     double minDeg() const { return m_min; }
     void setMinDeg(double v);
     double maxDeg() const { return m_max; }
@@ -73,6 +77,7 @@ private:
     QString m_key;
     QString m_name;
     double m_cnt90 = 937;
+    double m_cpr = 28000;
     double m_min = 0;
     double m_max = 90;
     bool m_enabled = true;

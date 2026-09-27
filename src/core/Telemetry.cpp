@@ -28,6 +28,12 @@ double Telemetry::velDeg() const
     return j ? j->countsToDeg(m_velPos) : 0;
 }
 
+double Telemetry::outputRpm() const
+{
+    const Joint *j = m_hand->joint(m_hand->benchJoint());
+    return (j && j->countsPerRev() > 0) ? m_velPos / j->countsPerRev() * 60.0 : 0.0;
+}
+
 void Telemetry::setCurrentLimitMa(double l)
 {
     l = qMax(1.0, l);
