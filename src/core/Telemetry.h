@@ -34,6 +34,9 @@ class Telemetry : public QObject
     Q_PROPERTY(QVariantMap fields READ fields NOTIFY updated)
     Q_PROPERTY(QString firmwareId READ firmwareId NOTIFY firmwareIdChanged)
     Q_PROPERTY(double peakMa READ peakMa NOTIFY updated)
+    Q_PROPERTY(double velCps READ velCps NOTIFY updated)
+    Q_PROPERTY(bool diagLow READ diagLow NOTIFY updated)
+    Q_PROPERTY(bool noMotion READ noMotion NOTIFY updated)
     Q_PROPERTY(double currentLimitMa READ currentLimitMa WRITE setCurrentLimitMa NOTIFY limitChanged)
     Q_PROPERTY(bool autoDisable READ autoDisable WRITE setAutoDisable NOTIFY limitChanged)
     Q_PROPERTY(bool overLimit READ overLimit NOTIFY updated)
@@ -55,6 +58,13 @@ public:
     double posDeg() const;
     double tgtDeg() const;
     double velDeg() const;
+    // velocity from position change over ~0.5 s (the firmware `vel` is a 1 kHz
+    // filtered difference and jumps by ~100 cnt/s on a single-count jitter)
+    double velCps() const { return m_velPos; }
+    // DIAG pin low while the driver is enabled (firmware may ignore it: USE_DIAG 0)
+    bool diagLow() const { return m_hasDiag && m_en && m_diag == 0; }
+    // duty applied but the encoder does not move
+    bool noMotion() const { return m_noMotion; }
     double errorDeg() const { return m_mode == 1 ? tgtDeg() - posDeg() : 0.0; }
     int homed() const { return m_homed; }
     bool multiJoint() const { return m_multi; }
@@ -105,6 +115,11 @@ private:
     bool m_autoDisable = false;
     bool m_overLimit = false;
     int m_count = 0;
+    struct PosSample { double t; double pos; };
+    QVector<PosSample> m_posHist;
+    double m_velPos = 0;
+    bool m_hasDiag = false;
+    bool m_noMotion = false;
     double m_lastMultiT = -1;
     QElapsedTimer m_rateClock;
 };

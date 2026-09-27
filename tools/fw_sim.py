@@ -224,6 +224,8 @@ class Firmware:
             self.err("unknown command '%s' (h for help)" % c)
 
     # --- control loop --------------------------------------------------
+    no_vm = False
+
     def step(self, dt):
         for m in self.motors:
             duty = 0.0
@@ -238,7 +240,13 @@ class Firmware:
                     duty = max(-self.limit, min(self.limit, e * 0.35))
                 elif self.mode == 2 and self.home:
                     duty = -abs(self.home["pct"])
-            m.step(dt, duty)
+            if self.no_vm:
+                m.out = duty
+                m.i_ma = 0.0
+                m.speed = 0.0
+                m.pos = float(random.choice([0, 1]))   # encoder sitting on an edge
+            else:
+                m.step(dt, duty)
             if m.i_ma > 800:
                 self.flt |= 2
         if self.en == 0:
@@ -264,11 +272,12 @@ class Firmware:
 
     def log_line(self):
         m = self.motors[0]
-        diag = 1 if self.en else 0
+        diag = 1 if (self.en and not self.no_vm) else 0
         if self.n == 1:
             self.write("en:%d,duty:%d,out:%.1f,i_mA:%d,flt:%d,diag:%d,pos:%d,tgt:%d,vel:%d,mode:%d" % (
                 self.en, self.duty, m.out, m.i_ma, self.flt, diag, m.pos,
-                m.tgt if self.mode == 1 else 0, m.speed, self.mode))
+                m.tgt if self.mode == 1 else 0,
+                (random.choice([-150, 0, 150]) if self.no_vm else m.speed), self.mode))
         else:
             q = ",".join("q%d:%d" % (i + 1, mm.pos) for i, mm in enumerate(self.motors))
             t = ",".join("t%d:%d" % (i + 1, mm.tgt) for i, mm in enumerate(self.motors))
@@ -298,6 +307,7 @@ def main():
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--joints", type=int, default=1, choices=[1, 6])
     ap.add_argument("--link", help="also create a symlink to the pty at this path")
+    ap.add_argument("--no-vm", action="store_true", help="simulate missing motor supply: no motion, no current, DIAG low")
     a = ap.parse_args()
 
     if a.port:
@@ -334,6 +344,7 @@ def main():
                 pass
 
     fw = Firmware(a.joints, lambda s: write_raw((s + "\r\n").encode()))
+    fw.no_vm = a.no_vm
     last = time.time()
     while True:
         data = read()

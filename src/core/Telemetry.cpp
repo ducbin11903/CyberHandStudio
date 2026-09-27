@@ -25,7 +25,7 @@ double Telemetry::tgtDeg() const
 double Telemetry::velDeg() const
 {
     const Joint *j = m_hand->joint(m_hand->benchJoint());
-    return j ? j->countsToDeg(m_vel) : 0;
+    return j ? j->countsToDeg(m_velPos) : 0;
 }
 
 void Telemetry::setCurrentLimitMa(double l)
@@ -57,6 +57,10 @@ void Telemetry::reset()
     m_hasData = false;
     m_multi = false;
     m_lastMultiT = -1;
+    m_posHist.clear();
+    m_velPos = 0;
+    m_hasDiag = false;
+    m_noMotion = false;
     m_fields.clear();
     m_homed = -1;
     m_peak = 0;
@@ -91,7 +95,7 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
         else if (n == QLatin1String("out")) m_out = v;
         else if (n == QLatin1String("i_mA")) m_iMa = v;
         else if (n == QLatin1String("flt")) m_flt = int(v);
-        else if (n == QLatin1String("diag")) m_diag = int(v);
+        else if (n == QLatin1String("diag")) { m_diag = int(v); m_hasDiag = true; }
         else if (n == QLatin1String("pos")) m_pos = v;
         else if (n == QLatin1String("tgt")) m_tgt = v;
         else if (n == QLatin1String("vel")) m_vel = v;
@@ -147,6 +151,18 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
             outNames << QStringLiteral("pos_deg") << QStringLiteral("tgt_deg");
             outValues << md << ((m_mode == 1) ? td : qQNaN());
         }
+    }
+
+    // position-based velocity and "duty but no motion" hint
+    if (names.contains(QLatin1String("pos")) || sawQ) {
+        m_posHist.append({t, m_pos});
+        while (m_posHist.size() > 2 && t - m_posHist.first().t > 0.6)
+            m_posHist.removeFirst();
+        const PosSample &a = m_posHist.first();
+        m_velPos = (t - a.t) > 1e-3 ? (m_pos - a.pos) / (t - a.t) : 0.0;
+        const bool driving = m_en && qAbs(m_out) >= 15.0 && m_mode != 1;
+        const bool windowFull = (t - a.t) >= 0.4;
+        m_noMotion = driving && windowFull && qAbs(m_pos - a.pos) <= 2.0;
     }
 
     if (qAbs(m_iMa) > m_peak)

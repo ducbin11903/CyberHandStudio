@@ -115,13 +115,34 @@ Card {
             Repeater {
                 model: [{ bit: 1, name: "DIAG" }, { bit: 2, name: qsTr("Quá dòng") }, { bit: 4, name: "KEY" }]
                 Badge {
-                    readonly property bool active: root.live && (root.tel.flt & modelData.bit)
+                    readonly property bool active: root.live && ((root.tel.flt & modelData.bit) || (modelData.bit === 1 && root.tel.diagLow))
                     text: modelData.name
                     fill: active ? Theme.liveRed : Theme.bgSunken
                     textColor: active ? Theme.textStrong : Theme.textMuted
                 }
             }
             Item { Layout.fillWidth: true }
+        }
+        TextLabel {
+            Layout.fillWidth: true
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            Layout.topMargin: 4
+            visible: text.length > 0
+            wrapMode: Text.WordWrap
+            elide: Text.ElideNone
+            font.pixelSize: Theme.fontSmall
+            color: Theme.liveRed
+            text: {
+                if (!root.live) return ""
+                var m = []
+                if (root.tel.diagLow) m.push(qsTr("Chân DIAG đang thấp khi driver bật: driver lỗi hoặc mất nguồn motor."))
+                if (root.tel.noMotion && Math.abs(root.tel.iMa) < 20)
+                    m.push(qsTr("Có duty nhưng không quay và không có dòng: kiểm tra nguồn motor, dây motor/encoder."))
+                else if (root.tel.noMotion)
+                    m.push(qsTr("Có dòng nhưng không quay: kẹt hoặc chạm chặn cơ khí."))
+                return m.join("\n")
+            }
         }
 
         Rectangle { Layout.fillWidth: true; Layout.topMargin: 10; height: 1; color: Theme.divider }
@@ -237,8 +258,9 @@ Card {
                 RowLayout {
                     TextLabel { text: qsTr("Status"); Layout.fillWidth: true }
                     Badge {
-                        text: !root.live ? "—" : (root.tel.overLimit ? "HIGH" : (root.tel.flt ? "FAULT" : "OK"))
-                        fill: !root.live ? Theme.bgSunken : (root.tel.overLimit || root.tel.flt ? Theme.liveRed : Theme.infoBlue)
+                        readonly property bool bad: root.tel.overLimit || root.tel.flt || root.tel.diagLow
+                        text: !root.live ? "—" : (root.tel.overLimit ? "HIGH" : ((root.tel.flt || root.tel.diagLow) ? "FAULT" : (root.tel.noMotion ? "STALL" : "OK")))
+                        fill: !root.live ? Theme.bgSunken : (bad ? Theme.liveRed : (root.tel.noMotion ? Theme.warnAmber : Theme.infoBlue))
                         textColor: !root.live ? Theme.textMuted : Theme.textOnAccent
                     }
                 }
