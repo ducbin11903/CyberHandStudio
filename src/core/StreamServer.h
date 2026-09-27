@@ -33,6 +33,16 @@ class StreamServer : public QObject
     Q_PROPERTY(QString calibratedAt READ calibratedAt NOTIFY calibrationChanged)
     Q_PROPERTY(QString lastError READ lastError NOTIFY lastErrorChanged)
     Q_PROPERTY(QStringList unitNames READ unitNames CONSTANT)
+    // input processing (applied in this order): average of the last N frames,
+    // 1st-order low-pass at filterHz, then velocity / acceleration limits
+    Q_PROPERTY(int handed READ handed WRITE setHanded NOTIFY processingChanged)
+    Q_PROPERTY(QStringList handedNames READ handedNames CONSTANT)
+    Q_PROPERTY(int averageN READ averageN WRITE setAverageN NOTIFY processingChanged)
+    Q_PROPERTY(double filterHz READ filterHz WRITE setFilterHz NOTIFY processingChanged)
+    Q_PROPERTY(double maxVel READ maxVel WRITE setMaxVel NOTIFY processingChanged)
+    Q_PROPERTY(double maxAccel READ maxAccel WRITE setMaxAccel NOTIFY processingChanged)
+    Q_PROPERTY(QVariantList processed READ processed NOTIFY processedChanged)
+    Q_PROPERTY(qint64 skippedFrames READ skippedFrames NOTIFY statsChanged)
 
 public:
     enum Unit { Degrees = 0, Percent = 1, Calibrated = 2 };
@@ -64,6 +74,26 @@ public:
     QString lastError() const { return m_error; }
     QStringList unitNames() const;
 
+    // frames may carry the hand side: JSON "hand":"left"/"right" or a text prefix "L "/"R "
+    enum Handed { AnyHand = 0, RightHand = 1, LeftHand = 2 };
+    Q_ENUM(Handed)
+    int handed() const { return m_handed; }
+    void setHanded(int h);
+    QStringList handedNames() const;
+    int averageN() const { return m_avgN; }
+    void setAverageN(int n);
+    double filterHz() const { return m_filterHz; }
+    void setFilterHz(double f);
+    double maxVel() const { return m_maxVel; }
+    void setMaxVel(double v);
+    double maxAccel() const { return m_maxAcc; }
+    void setMaxAccel(double a);
+    QVariantList processed() const;
+    qint64 skippedFrames() const { return m_skipped; }
+    Q_INVOKABLE void resetProcessing();
+    // one processing step of dt seconds (tests call this directly)
+    void processStep(double dt);
+
     Q_INVOKABLE bool start();
     Q_INVOKABLE void stop();
     Q_INVOKABLE bool toggle();
@@ -85,13 +115,15 @@ signals:
     void frameChanged();
     void calibrationChanged();
     void lastErrorChanged();
+    void processingChanged();
+    void processedChanged();
     // mapped frame (degrees, NaN = no value), throttled to sendRate
     void forward(const QVector<double> &deg);
     void preview(const QVector<double> &deg);
 
 private:
     void onReadyRead();
-    bool parseFrame(const QByteArray &data, QVector<double> *out) const;
+    bool parseFrame(const QByteArray &data, QVector<double> *out, int *hand = nullptr) const;
     void handleFrame(const QVector<double> &raw, const QString &sender);
     double mapValue(int ch, double v) const;
     void onSendTick();
@@ -120,4 +152,16 @@ private:
     QVector<double> m_calMin, m_calMax;
     QString m_calAt;
     QString m_error;
+    int m_handed = AnyHand;
+    int m_avgN = 1;
+    double m_filterHz = 0;
+    double m_maxVel = 0;
+    double m_maxAcc = 0;
+    QVector<QVector<double>> m_hist; // last N mapped values per channel
+    QVector<double> m_avg;           // after averaging
+    QVector<double> m_lp;            // after low-pass
+    QVector<double> m_proc;          // after rate limits = what is sent
+    QVector<double> m_vel;
+    qint64 m_skipped = 0;
+    bool m_haveFrame = false;
 };

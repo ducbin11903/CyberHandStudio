@@ -42,13 +42,20 @@ ApplicationWindow {
                 IconButton { iconPath: Icons.activity; tip: qsTr("Live log"); checked: Core.activeMode === "live"; onClicked: Core.activeMode = "live" }
                 IconButton { iconPath: Icons.terminal; tip: qsTr("Console"); checked: Core.activeMode === "console"; onClicked: Core.activeMode = "console" }
             }
-            IconButton {
+            ColumnLayout {
                 anchors.bottom: parent.bottom
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottomMargin: 6
-                iconPath: Icons.settings
-                tip: qsTr("Mở thư mục cấu hình")
-                onClicked: Core.config.openFolder()
+                spacing: 4
+                IconButton { iconPath: Icons.sliders; tip: qsTr("Manual Control"); checked: manualWin.visible; onClicked: manualWin.toggle() }
+                IconButton { iconPath: Icons.target; tip: qsTr("Calibration"); checked: calibWin.visible; onClicked: calibWin.toggle() }
+                IconButton { iconPath: Icons.table; tip: qsTr("Data Monitor"); checked: dataWin.visible; onClicked: dataWin.toggle() }
+                Rectangle { Layout.preferredWidth: 22; Layout.preferredHeight: 1; Layout.alignment: Qt.AlignHCenter; color: Theme.divider }
+                IconButton {
+                    iconPath: Icons.settings
+                    tip: qsTr("Mở thư mục cấu hình")
+                    onClicked: Core.config.openFolder()
+                }
             }
         }
 
@@ -85,6 +92,16 @@ ApplicationWindow {
                 SplitView.minimumHeight: 260
             }
         }
+    }
+
+    ManualControlWindow { id: manualWin; transientParent: null }
+    CalibrationWindow { id: calibWin; transientParent: null }
+    DataMonitorWindow { id: dataWin; transientParent: null }
+    // for --eval in screenshots / tests
+    function openTool(name) {
+        if (name === "manual") manualWin.show()
+        else if (name === "calibration") calibWin.show()
+        else if (name === "datamonitor") dataWin.show()
     }
 
     Shortcut {

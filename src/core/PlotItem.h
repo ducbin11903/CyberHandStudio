@@ -38,6 +38,10 @@ class PlotItem : public QQuickPaintedItem
 
 public:
     explicit PlotItem(QQuickItem *parent = nullptr);
+    ~PlotItem() override;
+    // repaint rate of every plot (Visual Refresh Rate), Hz
+    static void setRefreshHz(double hz);
+    static double refreshHz();
 
     void paint(QPainter *p) override;
 

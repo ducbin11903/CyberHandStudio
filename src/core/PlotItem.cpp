@@ -1,6 +1,7 @@
 #include "PlotItem.h"
 
 #include <QPainter>
+#include <QSet>
 #include <QPainterPath>
 #include <cmath>
 
@@ -10,12 +11,37 @@ static const QColor kFallback[] = {
     QColor("#9C8F5E"), QColor("#7B9A5A"),
 };
 
+static QSet<PlotItem *> &allPlots()
+{
+    static QSet<PlotItem *> s;
+    return s;
+}
+static double g_refreshHz = 30.0;
+
+void PlotItem::setRefreshHz(double hz)
+{
+    g_refreshHz = qBound(1.0, hz, 144.0);
+    for (PlotItem *p : allPlots())
+        p->m_throttle.setInterval(qMax(1, int(1000.0 / g_refreshHz)));
+}
+
+double PlotItem::refreshHz()
+{
+    return g_refreshHz;
+}
+
+PlotItem::~PlotItem()
+{
+    allPlots().remove(this);
+}
+
 PlotItem::PlotItem(QQuickItem *parent)
     : QQuickPaintedItem(parent)
 {
+    allPlots().insert(this);
     setAntialiasing(true);
     setOpaquePainting(true);
-    m_throttle.setInterval(33);
+    m_throttle.setInterval(qMax(1, int(1000.0 / g_refreshHz)));
     m_throttle.setSingleShot(true);
     connect(&m_throttle, &QTimer::timeout, this, [this]() {
         if (m_dirty) {

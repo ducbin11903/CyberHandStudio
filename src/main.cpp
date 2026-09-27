@@ -8,6 +8,7 @@
 #include <QQmlExpression>
 #include <QQuickStyle>
 #include <QQuickWindow>
+#include <QFileInfo>
 #include <QTimer>
 #include <QDebug>
 
@@ -105,6 +106,15 @@ int main(int argc, char *argv[])
             if (window) {
                 const QImage img = window->grabWindow();
                 img.save(file);
+            }
+            // extra tool windows (Manual control, Calibration, Data monitor): file_<objectName>.png
+            const QFileInfo fi(file);
+            for (QWindow *w : QGuiApplication::topLevelWindows()) {
+                auto *qw = qobject_cast<QQuickWindow *>(w);
+                if (!qw || qw == window || !qw->isVisible() || qw->objectName().isEmpty())
+                    continue;
+                qw->grabWindow().save(fi.path() + QLatin1Char('/') + fi.completeBaseName() + QLatin1Char('_')
+                                      + qw->objectName() + QLatin1Char('.') + fi.suffix());
             }
             QGuiApplication::quit();
         });

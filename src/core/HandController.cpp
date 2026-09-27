@@ -135,6 +135,31 @@ bool HandController::applyLogRate()
     return send(QStringLiteral("l ") + LineParser::num(m_logRate, 0));
 }
 
+bool HandController::applyPowerRate()
+{
+    return send(QStringLiteral("a ") + LineParser::num(m_powerRate, 0));
+}
+
+bool HandController::sendCountsPer90(double cnt)
+{
+    if (cnt < 1)
+        return false;
+    return send(QStringLiteral("j ") + LineParser::num(cnt, 0));
+}
+
+bool HandController::sendProtection(double ma, double ms, int fwResponse, double retractDeg)
+{
+    return send(QStringLiteral("I %1 %2 %3 %4")
+                    .arg(LineParser::num(ma, 0), LineParser::num(ms, 0))
+                    .arg(qBound(0, fwResponse, 3))
+                    .arg(LineParser::num(retractDeg, 1)));
+}
+
+int HandController::streamCommands(bool force)
+{
+    return sendJoints(m_hand->commandVector(), force, !force);
+}
+
 bool HandController::applyPose(const QVariantList &deg)
 {
     QVector<double> v;

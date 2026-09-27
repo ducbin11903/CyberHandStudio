@@ -5,7 +5,7 @@ import QtQuick.Layouts
 import CyberHand
 import CyberHand.Core
 
-// TIMELINE mode: one track per joint, clips move the joint to a target with an easing curve.
+// TIMELINE mode: clip library | one track per joint | clip details.
 Item {
     id: root
     readonly property var tl: Core.timeline
@@ -19,6 +19,33 @@ Item {
     property bool showCurves: true
     readonly property real pps: Math.max(10, (lanesView.width - 2) / Math.max(0.5, tl.length) * zoom)
     readonly property var easingIcons: [Icons.ramp, Icons.curve, Icons.easeIn, Icons.easeOut, Icons.step]
+    readonly property var kindIcons: [Icons.curve, Icons.hold, Icons.ramp, Icons.sine, Icons.square, Icons.triangle, Icons.sawtooth, Icons.easeIn]
+    readonly property var shapeIcons: [Icons.easeIn, Icons.easeOut, Icons.inOut, Icons.outIn]
+    property int activeTrack: 2
+
+    function clipIcon(kind, easing, a, b, shape) {
+        if (kind === 0) return easingIcons[easing]
+        if (kind === 2 && b < a) return Icons.rampDown
+        if (kind === 7) return shapeIcons[shape] || Icons.easeIn
+        return kindIcons[kind] || Icons.curve
+    }
+    function clipLabel(m) {
+        switch (m.kind) {
+        case 0: return "→ " + Math.round(m.target) + "°"
+        case 1: return Math.round(m.pa) + "°"
+        case 2: case 7: return Math.round(m.pa) + "→" + Math.round(m.pb) + "°"
+        default: return Math.round(m.pa) + "–" + Math.round(m.pb) + "° · " + Number(m.period).toFixed(2).replace(/\.?0+$/, "") + " s"
+        }
+    }
+    // library drop: scene point -> track/time
+    function dropAt(key, sx, sy) {
+        var p = lanes.mapFromItem(null, sx, sy)
+        if (p.x < 0 || p.y < 0 || p.x > lanes.width || p.y > lanes.height) return
+        var track = Math.floor(p.y / root.rowHeight)
+        var row = root.tl.addPreset(track, root.snapT(p.x / root.pps), key)
+        if (row >= 0) { root.tl.selected = row; root.activeTrack = track }
+        else Core.console.error(root.tl.lastError)
+    }
 
     function snapT(t) { return snap ? Math.round(t / snapStep) * snapStep : t }
 
@@ -68,6 +95,28 @@ Item {
         onAccepted: root.traj.saveCsv(selectedFile)
     }
     ConfirmDialog { id: confirm }
+    TextPrompt {
+        id: customPrompt
+        property int row: -1
+        onAccepted: (name) => { root.tl.saveCustom(row, name); Core.saveNow() }
+    }
+    Rectangle {
+        id: dragProxy
+        property string name
+        property string icon
+        visible: false
+        z: 100
+        width: 84; height: 28
+        radius: Theme.radiusSmall
+        color: Theme.clip
+        opacity: 0.9
+        Row {
+            anchors.centerIn: parent
+            spacing: 4
+            Icon { width: 14; height: 14; path: Icons[dragProxy.icon] || Icons.curve; color: Theme.textStrong; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: dragProxy.name; color: Theme.textStrong; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSmall }
+        }
+    }
 
     Popup {
         id: settingsPop
@@ -97,6 +146,19 @@ Item {
         anchors.fill: parent
         anchors.margins: 8
         spacing: 6
+
+        ClipLibrary {
+            Layout.preferredWidth: 176
+            Layout.fillHeight: true
+            onDragStarted: (key, name, icon) => { dragProxy.name = name; dragProxy.icon = icon; dragProxy.visible = true }
+            onDragMoved: (sx, sy) => { var p = root.mapFromItem(null, sx, sy); dragProxy.x = p.x - dragProxy.width / 2; dragProxy.y = p.y - dragProxy.height / 2 }
+            onDropped: (key, sx, sy) => { dragProxy.visible = false; root.dropAt(key, sx, sy) }
+            onPicked: (key) => {
+                var row = root.tl.addPreset(root.activeTrack, root.snapT(root.player.position), key)
+                if (row >= 0) root.tl.selected = row
+                else Core.console.error(root.tl.lastError)
+            }
+        }
 
         ColumnLayout {
             Layout.fillWidth: true
@@ -184,7 +246,8 @@ Item {
                         Rectangle {
                             width: root.labelWidth
                             height: root.rowHeight
-                            color: Theme.bgDeep
+                            color: index === root.activeTrack ? Theme.bgHover : Theme.bgDeep
+                            MouseArea { anchors.fill: parent; onClicked: root.activeTrack = index }
                             Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.bgPanel }
                             Row {
                                 anchors.verticalCenter: parent.verticalCenter
@@ -239,15 +302,17 @@ Item {
                                     height: parent.height
                                     color: Theme.bgDeep
                                 }
+                                Rectangle {
+                                    // active track marker
+                                    visible: index === root.activeTrack
+                                    width: 2; height: parent.height
+                                    color: Theme.jointColor(index)
+                                }
                                 MouseArea {
                                     anchors.fill: parent
-                                    onClicked: root.tl.selected = -1
+                                    onClicked: { root.tl.selected = -1; root.activeTrack = index }
                                     onDoubleClicked: (m) => {
-                                        var t = root.snapT(m.x / root.pps)
-                                        var j = Core.hand.joints[index]
-                                        var v = root.tl.valueAt(index, t)
-                                        var target = v < (j.minDeg + j.maxDeg) / 2 ? j.maxDeg : j.minDeg
-                                        var row = root.tl.addClip(index, t, 1.0, target, 1)
+                                        var row = root.tl.addPreset(index, root.snapT(m.x / root.pps), "move")
                                         if (row >= 0) root.tl.selected = row
                                     }
                                 }
@@ -274,33 +339,24 @@ Item {
                                     visible: root.showCurves && clipItem.width > 30
                                     anchors.fill: parent
                                     anchors.margins: 3
-                                    property real fromV: model.fromValue
-                                    property real toV: model.target
-                                    property int easing: model.easing
-                                    onFromVChanged: requestPaint()
-                                    onToVChanged: requestPaint()
-                                    onEasingChanged: requestPaint()
+                                    property var values: model.curve
+                                    property int track: model.track
+                                    onValuesChanged: requestPaint()
                                     onWidthChanged: requestPaint()
-                                    function ease(e, a) {
-                                        if (e === 0) return a
-                                        if (e === 2) return a * a
-                                        if (e === 3) return 1 - (1 - a) * (1 - a)
-                                        if (e === 4) return a > 0 ? 1 : 0
-                                        return 0.5 - 0.5 * Math.cos(Math.PI * a)
-                                    }
+                                    onTrackChanged: requestPaint()
                                     onPaint: {
                                         var ctx = getContext("2d")
                                         ctx.reset()
-                                        var j = Core.hand.joints[model.track]
+                                        var v = values
+                                        if (!v || v.length < 2) return
+                                        var j = Core.hand.joints[track]
                                         var lo = j.minDeg, hi = j.maxDeg
-                                        ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.35)
+                                        ctx.strokeStyle = Qt.rgba(1, 1, 1, 0.38)
                                         ctx.lineWidth = 1.2
                                         ctx.beginPath()
-                                        for (var i = 0; i <= 40; ++i) {
-                                            var a = i / 40
-                                            var v = fromV + (toV - fromV) * ease(easing, a)
-                                            var px = a * width
-                                            var py = height - (v - lo) / Math.max(1e-6, hi - lo) * height
+                                        for (var i = 0; i < v.length; ++i) {
+                                            var px = i / (v.length - 1) * width
+                                            var py = height - (v[i] - lo) / Math.max(1e-6, hi - lo) * height
                                             if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py)
                                         }
                                         ctx.stroke()
@@ -311,15 +367,15 @@ Item {
                                     anchors.verticalCenter: parent.verticalCenter
                                     width: 14; height: 14
                                     visible: clipItem.width > 22
-                                    path: root.easingIcons[model.easing]
+                                    path: root.clipIcon(model.kind, model.easing, model.pa, model.pb, model.shape)
                                     color: Theme.textStrong
                                 }
                                 TextLabel {
                                     anchors.right: parent.right
                                     anchors.rightMargin: 8
                                     anchors.verticalCenter: parent.verticalCenter
-                                    visible: clipItem.width > 70
-                                    text: "→ " + Math.round(model.target) + "°"
+                                    visible: clipItem.width > 90
+                                    text: root.clipLabel(model)
                                     font.pixelSize: Theme.fontTiny
                                     color: Theme.textStrong
                                 }
@@ -333,6 +389,7 @@ Item {
                                     property real origStart: 0
                                     onPressed: (m) => {
                                         root.tl.selected = index
+                                        root.activeTrack = model.track
                                         pressX = mapToItem(lanes, m.x, m.y).x
                                         origStart = model.start
                                     }
@@ -373,95 +430,75 @@ Item {
                     }
                 }
             }
+            // ---- overview: whole timeline, drag the window to scroll ------------
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.topMargin: 6
+                Layout.preferredHeight: 30
+                Layout.maximumHeight: 30
+                spacing: 0
+                TextLabel { Layout.preferredWidth: root.labelWidth; text: qsTr("Tổng quan"); muted: true; font.pixelSize: Theme.fontSmall }
+                Rectangle {
+                    id: overview
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: Theme.radiusSmall
+                    color: Theme.bgDeep
+                    readonly property real sx: width / Math.max(0.5, root.tl.length)
+                    Repeater {
+                        model: root.tl
+                        Rectangle {
+                            x: model.start * overview.sx
+                            y: 3 + model.track * ((overview.height - 6) / Core.hand.count)
+                            width: Math.max(2, model.duration * overview.sx)
+                            height: Math.max(2, (overview.height - 6) / Core.hand.count - 1)
+                            color: Theme.jointColor(model.track)
+                            opacity: root.tl.selected === index ? 1 : 0.75
+                        }
+                    }
+                    Rectangle {
+                        x: root.player.position * overview.sx
+                        width: 1; height: parent.height
+                        color: Theme.playhead
+                    }
+                    Rectangle {
+                        id: viewWin
+                        readonly property real frac: lanesView.width / Math.max(1, lanesView.contentWidth)
+                        visible: frac < 0.999
+                        x: lanesView.contentX / Math.max(1, lanesView.contentWidth) * overview.width
+                        width: Math.max(8, frac * overview.width)
+                        height: parent.height
+                        color: Theme.alpha(Theme.textStrong, 0.08)
+                        border.color: Theme.textSecondary
+                        radius: Theme.radiusSmall
+                    }
+                    MouseArea {
+                        anchors.fill: parent
+                        function go(mx) {
+                            var cw = lanesView.contentWidth
+                            var cx = mx / overview.width * cw - lanesView.width / 2
+                            lanesView.contentX = Math.max(0, Math.min(cw - lanesView.width, cx))
+                        }
+                        onPressed: (m) => go(m.x)
+                        onPositionChanged: (m) => { if (pressed) go(m.x) }
+                    }
+                }
+            }
             Item { Layout.fillHeight: true }
             TextLabel {
                 Layout.fillWidth: true
                 muted: true
                 font.pixelSize: Theme.fontSmall
-                text: qsTr("Nhấp đúp vào làn để thêm clip · kéo để dời · kéo mép phải để đổi độ dài · Delete để xóa · Ctrl+cuộn để zoom")
+                text: qsTr("Kéo clip từ thư viện vào làn · nhấp đúp làn để thêm Move · kéo để dời · kéo mép phải đổi độ dài · Delete xóa · Ctrl+D nhân bản · Ctrl+cuộn zoom")
             }
         }
 
-        // ---- inspector --------------------------------------------------
-        Rectangle {
-            id: inspector
-            Layout.preferredWidth: 210
+        ClipDetails {
+            Layout.preferredWidth: 264
             Layout.fillHeight: true
-            radius: Theme.radiusSmall
-            color: Theme.bgSunken
-            property int rev: 0
-            readonly property var c: (rev, root.tl.selected >= 0 ? root.tl.clip(root.tl.selected) : ({}))
-            readonly property var joint: c.track !== undefined ? Core.hand.joints[c.track] : null
-            Connections {
-                target: root.tl
-                function onDataChanged() { inspector.rev++ }
-                function onSelectedChanged() { inspector.rev++ }
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 8
-                spacing: 6
-                visible: root.tl.selected >= 0
-
-                TextLabel { text: qsTr("Clip"); font.bold: true }
-                TextLabel {
-                    text: inspector.joint ? inspector.joint.name : ""
-                    color: inspector.joint ? Theme.jointColor(inspector.c.track) : Theme.textPrimary
-                }
-                FormRow {
-                    label: qsTr("Bắt đầu"); labelWidth: 64
-                    NumberField { Layout.fillWidth: true; value: inspector.c.start || 0; decimals: 2; from: 0; to: 3600; unit: "s"; onCommitted: (v) => root.tl.moveClip(root.tl.selected, v) }
-                }
-                FormRow {
-                    label: qsTr("Độ dài"); labelWidth: 64
-                    NumberField { Layout.fillWidth: true; value: inspector.c.duration || 0; decimals: 2; from: 0.05; to: 3600; unit: "s"; onCommitted: (v) => root.tl.resizeClip(root.tl.selected, v) }
-                }
-                FormRow {
-                    label: qsTr("Đích"); labelWidth: 64
-                    NumberField { Layout.fillWidth: true; value: inspector.c.target || 0; decimals: 1; from: -180; to: 180; unit: "°"; onCommitted: (v) => root.tl.setClipTarget(root.tl.selected, v) }
-                }
-                FlatSlider {
-                    Layout.fillWidth: true
-                    from: inspector.joint ? inspector.joint.minDeg : 0
-                    to: inspector.joint ? inspector.joint.maxDeg : 90
-                    value: inspector.c.target || 0
-                    fillColor: inspector.joint ? Theme.jointColor(inspector.c.track) : Theme.textSecondary
-                    onMoved: root.tl.setClipTarget(root.tl.selected, value)
-                }
-                FormRow {
-                    label: qsTr("Easing"); labelWidth: 64
-                    FlatCombo {
-                        Layout.fillWidth: true
-                        model: root.tl.easingNames
-                        currentIndex: inspector.c.easing !== undefined ? inspector.c.easing : 1
-                        onActivated: (i) => root.tl.setClipEasing(root.tl.selected, i)
-                    }
-                }
-                TextLabel {
-                    text: qsTr("Từ %1° → %2°").arg(Math.round(inspector.c.fromValue || 0)).arg(Math.round(inspector.c.target || 0))
-                    secondary: true
-                    font.pixelSize: Theme.fontSmall
-                }
-                Item { Layout.fillHeight: true }
-                FlatButton {
-                    Layout.fillWidth: true
-                    text: qsTr("Xóa clip")
-                    danger: true
-                    iconPath: Icons.trash
-                    onClicked: root.tl.removeSelected()
-                }
-            }
-            TextLabel {
-                anchors.centerIn: parent
-                width: parent.width - 20
-                visible: root.tl.selected < 0
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-                elide: Text.ElideNone
-                secondary: true
-                font.pixelSize: Theme.fontSmall
-                text: qsTr("Chọn một clip để sửa đích, độ dài và kiểu chuyển động")
+            onSaveCustomRequested: (row) => {
+                customPrompt.row = row
+                customPrompt.ask(qsTr("Tên clip Custom"), root.tl.kindNames[root.tl.clip(row).kind])
             }
         }
     }
@@ -470,5 +507,10 @@ Item {
         sequences: [StandardKey.Delete, "Backspace"]
         enabled: root.visible && root.tl.selected >= 0
         onActivated: root.tl.removeSelected()
+    }
+    Shortcut {
+        sequence: "Ctrl+D"
+        enabled: root.visible && root.tl.selected >= 0
+        onActivated: root.tl.duplicateClip(root.tl.selected)
     }
 }

@@ -21,6 +21,7 @@ class HandController : public QObject
     Q_PROPERTY(double homePct READ homePct WRITE setHomePct NOTIFY settingsChanged)
     Q_PROPERTY(double homeMa READ homeMa WRITE setHomeMa NOTIFY settingsChanged)
     Q_PROPERTY(double velocity READ velocity WRITE setVelocity NOTIFY settingsChanged)
+    Q_PROPERTY(double powerRate READ powerRate WRITE setPowerRate NOTIFY settingsChanged)
     Q_PROPERTY(QString lastCommand READ lastCommand NOTIFY lastCommandChanged)
     Q_PROPERTY(QStringList protocolNames READ protocolNames CONSTANT)
 
@@ -50,6 +51,9 @@ public:
     void setHomeMa(double v) { m_homeMa = qMax(0.0, v); emit settingsChanged(); }
     double velocity() const { return m_velocity; }
     void setVelocity(double v) { m_velocity = v; emit settingsChanged(); }
+    // current (OCM) averaging window in firmware, as updates per second (`a <hz>`)
+    double powerRate() const { return m_powerRate; }
+    void setPowerRate(double v) { m_powerRate = qBound(1.0, v, 1000.0); emit settingsChanged(); }
     QString lastCommand() const { return m_last; }
     QStringList protocolNames() const;
 
@@ -77,6 +81,15 @@ public:
     Q_INVOKABLE bool applyPid();
     Q_INVOKABLE bool applyLogRate();
     Q_INVOKABLE bool applyPose(const QVariantList &deg);
+    Q_INVOKABLE bool applyPowerRate();
+    Q_INVOKABLE bool requestId() { return send(QStringLiteral("i")); }
+    // firmware joint calibration: counts at 90 deg (`j <cnt>`)
+    Q_INVOKABLE bool sendCountsPer90(double cnt);
+    // firmware over-current protection: `I <mA> <ms> <resp> <deg>`,
+    // resp 0 trip (disable), 1 retract, 2 hold, 3 warn only
+    Q_INVOKABLE bool sendProtection(double ma, double ms, int fwResponse, double retractDeg);
+    // send the joint commands as they are now (manual sliders)
+    Q_INVOKABLE int streamCommands(bool force = false);
 
     // Streaming path (player, stream input, gamepad): sends only joints that moved
     // more than the deadband, logged quietly. Always updates the preview.
@@ -103,6 +116,7 @@ private:
     double m_homePct = 30;
     double m_homeMa = 250;
     double m_velocity = 30;
+    double m_powerRate = 50;
     QString m_last;
     QVector<double> m_lastSent;
 };

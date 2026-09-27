@@ -15,6 +15,16 @@ Cập nhật: 2026-09-27
 - Đã thử với fw_sim: home → PID → đồ thị; phát CSV bench; console lỗi/OK; 6 khớp + Stream mirror (`G q1..q6`); tay cầm mô phỏng; AI qua API giả.
 - Bảng Status theo "Khớp chính" cả khi log 6 khớp.
 
+### 0.2.0 (tham khảo Gesture HW1)
+
+- Timeline: thư viện clip (Linear: Hold / Ramp up / Ramp down / Move, Wave: Sine / Square / Triangle / Sawtooth, Power: In / Out / In-Out / Out-In, Custom), kéo thả vào làn; Clip Details (Type, Axis, Start/End/Duration, tham số đường cong, công thức, đồ thị); thanh tổng quan; nhân bản (Ctrl+D).
+- Manual Control: 6 slider dọc, góc lệnh / đo, dòng từng khớp, Total Current Draw.
+- Safety: ngưỡng dòng từng khớp, phản ứng Cảnh báo / Tắt driver / Lùi (RETR) / Giữ, xử lý tại App hoặc Firmware (`I`).
+- Calibration: quét 2 chặn cơ khí (H → o +duty tới khi kẹt) hoặc ghi điểm tay, fit tuyến tính + R², Áp dụng → cnt/90° + `j`.
+- Stream Input Processing: Handed, Sampling Rate, Filter Frequency, Averaging, Max Velocity, Max Acceleration.
+- Đèn trạng thái OFFLINE / IDLE / READY / RUN / FAULT, Data Monitor (mọi field + min/max, bảng khớp), Visual Refresh Rate, Power Sample Rate (`a`).
+- Firmware H562 fw 0.5: `i`, `j`, `I`, `a`, dòng `OVERI:`; đã thử logic trên máy (stub HAL) và fw_sim.
+
 ## Giả định cần Duc xác nhận
 
 - T2 = xoay ngón cái (opposition), T1 = gập ngón cái.
@@ -23,7 +33,8 @@ Cập nhật: 2026-09-27
 
 ## Việc tiếp theo
 
-- Duc thử trên bench H562 thật (COM8), báo lỗi/ảnh chụp.
+- Duc build + nạp firmware fw 0.5, thử trên bench H562 thật (COM8): Calibration Start cho Index, Safety = Firmware + Lùi.
+- Pin %, LED demo của Gesture: chưa áp dụng (bench không có pin / LED RGB).
 
 - Mesh bàn tay thật từ CAD (glTF) thay khối.
 - Firmware MCB: log `q1..q6`, lệnh `g <j> <độ>` / `G ...`, USB CDC.

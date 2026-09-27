@@ -1,0 +1,15 @@
+{
+  "format": "cyberhand-timeline-2",
+  "name": "wave_demo",
+  "length": 8,
+  "clips": [
+    {"track": "I",  "start": 0.0, "duration": 6.0, "kind": "sine",     "trough": 0,  "crest": 90, "period": 2.0, "shift": 0.0},
+    {"track": "M",  "start": 0.0, "duration": 6.0, "kind": "sine",     "trough": 0,  "crest": 90, "period": 2.0, "shift": 0.25},
+    {"track": "R",  "start": 0.0, "duration": 6.0, "kind": "sine",     "trough": 0,  "crest": 90, "period": 2.0, "shift": 0.5},
+    {"track": "P",  "start": 0.0, "duration": 6.0, "kind": "sine",     "trough": 0,  "crest": 90, "period": 2.0, "shift": 0.75},
+    {"track": "T1", "start": 0.0, "duration": 3.0, "kind": "triangle", "trough": 0,  "crest": 45, "period": 1.5, "shift": 0.0},
+    {"track": "T2", "start": 0.0, "duration": 1.0, "kind": "power",    "from": 0,    "to": 60,    "exponent": 2, "shape": "inout"},
+    {"track": "T2", "start": 5.0, "duration": 1.0, "kind": "ramp",     "from": 60,   "to": 0},
+    {"track": "I",  "start": 6.5, "duration": 1.0, "kind": "hold",     "value": 0}
+  ]
+}

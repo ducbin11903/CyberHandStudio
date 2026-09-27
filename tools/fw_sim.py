@@ -18,10 +18,7 @@ import sys
 import time
 
 CNT90 = 7000.0   # 28000 cnt/rev output (7 PPR x4 x 1:1000), joint 1:1
-
-
-def deg2cnt(d):
-    return d * CNT90 / 90.0
+FW_VERSION = "0.5"
 
 
 class Motor:
@@ -32,6 +29,8 @@ class Motor:
         self.out = 0.0          # applied duty %
         self.tgt = 0.0
         self.i_ma = 0.0
+        self.i_rep = 0.0        # reported current after the `a <hz>` averaging
+        self.over_ms = 0.0
         self.stalled = False
 
     def step(self, dt, duty):
@@ -72,10 +71,22 @@ class Firmware:
         self.log_hz = 5.0
         self.vel_dps = 0.0
         self.home = None         # dict while homing
+        self.cnt90 = CNT90       # `j <cnt>`
+        self.itrip = 500.0       # `I <mA> <ms> <resp> <deg>`
+        self.itrip_ms = 300.0
+        self.iresp = 0           # 0 trip, 1 retract, 2 hold, 3 warn
+        self.retract_deg = 10.0
+        self.i_hz = 1000.0       # `a <hz>` current averaging
         self.buf = b""
         self.last_log = 0.0
         self.write("USBX: OK")
-        self.write("ID: CyberHand-H562 sim fw 0.4 joints=%d cnt90=%d" % (joints, CNT90))
+        self.write(self.id_line())
+
+    def id_line(self):
+        return "ID: CyberHand-H562 sim fw %s joints=%d cnt90=%d" % (FW_VERSION, self.n, self.cnt90)
+
+    def deg2cnt(self, d):
+        return d * self.cnt90 / 90.0
 
     # --- CLI -----------------------------------------------------------
     def feed(self, data):
@@ -152,7 +163,7 @@ class Firmware:
                 return self.err("g <deg>")
             self.vel_dps = 0
             self.mode = 1
-            self.motors[j].tgt = deg2cnt(max(0, min(90, d)))
+            self.motors[j].tgt = self.deg2cnt(max(0, min(90, d)))
             self.ok("goto %.1f deg" % d)
         elif c == "G":
             vals = [num(i) for i in range(self.n)]
@@ -161,7 +172,7 @@ class Firmware:
             self.vel_dps = 0
             self.mode = 1
             for m, d in zip(self.motors, vals):
-                m.tgt = deg2cnt(max(0, min(90, d)))
+                m.tgt = self.deg2cnt(max(0, min(90, d)))
             self.ok("goto all")
         elif c == "p":
             v = num(0)
@@ -219,7 +230,29 @@ class Firmware:
             self.log_hz = v
             self.ok("log %d Hz" % v)
         elif c == "i":
-            self.write("ID: CyberHand-H562 sim fw 0.4 joints=%d cnt90=%d" % (self.n, CNT90))
+            self.write(self.id_line())
+        elif c == "j":
+            v = num(0)
+            if v is None:
+                return self.ok("cnt90=%d" % self.cnt90)
+            if not 100 <= v <= 1000000:
+                return self.err("j <100..1000000>")
+            self.cnt90 = float(int(v))
+            self.ok("cnt90=%d" % self.cnt90)
+        elif c == "I":
+            if not args:
+                return self.ok("trip i>%d mA %d ms resp=%d retract=%.1f deg" % (self.itrip, self.itrip_ms, self.iresp, self.retract_deg))
+            ma, ms, resp, deg = num(0), num(1, self.itrip_ms), num(2, self.iresp), num(3, self.retract_deg)
+            if ma is None or ma <= 0:
+                return self.err("I <mA> [ms] [resp 0 trip|1 retract|2 hold|3 warn] [deg]")
+            self.itrip, self.itrip_ms, self.iresp, self.retract_deg = ma, max(1, ms), int(max(0, min(3, resp))), max(0.5, deg)
+            self.ok("trip i>%d mA %d ms resp=%d retract=%.1f deg" % (self.itrip, self.itrip_ms, self.iresp, self.retract_deg))
+        elif c == "a":
+            v = num(0)
+            if v is None or not 1 <= v <= 1000:
+                return self.err("a <1..1000>")
+            self.i_hz = v
+            self.ok("i avg %d Hz" % v)
         else:
             self.err("unknown command '%s' (h for help)" % c)
 
@@ -234,8 +267,8 @@ class Firmware:
                     duty = self.duty
                 elif self.mode == 1:
                     if self.vel_dps:
-                        m.tgt += deg2cnt(self.vel_dps) * dt
-                        m.tgt = max(0, min(deg2cnt(90), m.tgt))
+                        m.tgt += self.deg2cnt(self.vel_dps) * dt
+                        m.tgt = max(0, min(self.deg2cnt(90), m.tgt))
                     e = m.tgt - m.pos
                     duty = max(-self.limit, min(self.limit, e * 0.35))
                 elif self.mode == 2 and self.home:
@@ -247,10 +280,16 @@ class Firmware:
                 m.pos = float(random.choice([0, 1]))   # encoder sitting on an edge
             else:
                 m.step(dt, duty)
-            if m.i_ma > 800:
-                self.flt |= 2
-        if self.en == 0:
-            self.flt &= ~2
+            # reported current: mean over 1/i_hz s
+            m.i_rep += (m.i_ma - m.i_rep) * min(1.0, dt * self.i_hz)
+            # over-current protection, same rules as the firmware
+            if self.en and m.i_ma > self.itrip:
+                m.over_ms += dt * 1000.0
+                if m.over_ms >= self.itrip_ms:
+                    m.over_ms = 0.0
+                    self.over_current(m)
+            else:
+                m.over_ms = 0.0
         if self.mode == 2 and self.home:
             m = self.motors[0]
             if m.stalled and m.i_ma > self.home["ma"]:
@@ -270,18 +309,41 @@ class Firmware:
             self.last_log = now
             self.log_line()
 
+    def over_current(self, m):
+        i = int(m.i_ma)
+        if self.iresp == 0:
+            self.en = 0
+            self.mode = 0
+            self.duty = 0
+            self.flt |= 2
+            self.write("OVERI: trip i=%d mA" % i)
+        elif self.iresp == 1:
+            self.mode = 1
+            self.vel_dps = 0
+            self.home = None
+            m.tgt = max(0.0, m.pos - self.deg2cnt(self.retract_deg))
+            self.write("OVERI: retract i=%d mA to %d cnt" % (i, m.tgt))
+        elif self.iresp == 2:
+            self.mode = 1
+            self.vel_dps = 0
+            self.home = None
+            m.tgt = m.pos
+            self.write("OVERI: hold i=%d mA at %d cnt" % (i, m.tgt))
+        else:
+            self.write("OVERI: warn i=%d mA" % i)
+
     def log_line(self):
         m = self.motors[0]
         diag = 1 if (self.en and not self.no_vm) else 0
         if self.n == 1:
             self.write("en:%d,duty:%d,out:%.1f,i_mA:%d,flt:%d,diag:%d,pos:%d,tgt:%d,vel:%d,mode:%d" % (
-                self.en, self.duty, m.out, m.i_ma, self.flt, diag, m.pos,
+                self.en, self.duty, m.out, m.i_rep, self.flt, diag, m.pos,
                 m.tgt if self.mode == 1 else 0,
                 (random.choice([-150, 0, 150]) if self.no_vm else m.speed), self.mode))
         else:
             q = ",".join("q%d:%d" % (i + 1, mm.pos) for i, mm in enumerate(self.motors))
             t = ",".join("t%d:%d" % (i + 1, mm.tgt) for i, mm in enumerate(self.motors))
-            c = ",".join("i%d:%d" % (i + 1, mm.i_ma) for i, mm in enumerate(self.motors))
+            c = ",".join("i%d:%d" % (i + 1, mm.i_rep) for i, mm in enumerate(self.motors))
             self.write("%s,%s,%s,en:%d,flt:%d,mode:%d" % (q, t, c, self.en, self.flt, self.mode))
 
 
@@ -297,6 +359,9 @@ CyberHand H562 sim — commands (end with CR or LF):
   H [pct] [mA]   home: back off to the extension stop, stop on current/stall, set 0
   z  c  s        zero here, clear faults, print one log line
   l <hz>         log rate (<= 100 Hz)
+  a <hz>         current averaging: i_mA = mean over 1/hz s (1..1000)
+  j [cnt]        counts at 90 deg (joint calibration), no arg = print
+  I [mA ms r d]  over-current: trip level, hold time, reaction 0 trip / 1 retract d deg / 2 hold / 3 warn
   i  h           id line, this help
 """
 

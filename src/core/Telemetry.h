@@ -40,9 +40,24 @@ class Telemetry : public QObject
     Q_PROPERTY(bool noMotion READ noMotion NOTIFY updated)
     Q_PROPERTY(double currentLimitMa READ currentLimitMa WRITE setCurrentLimitMa NOTIFY limitChanged)
     Q_PROPERTY(bool autoDisable READ autoDisable WRITE setAutoDisable NOTIFY limitChanged)
+    Q_PROPERTY(int overResponse READ overResponse WRITE setOverResponse NOTIFY limitChanged)
+    Q_PROPERTY(int overSource READ overSource WRITE setOverSource NOTIFY limitChanged)
+    Q_PROPERTY(double retractDeg READ retractDeg WRITE setRetractDeg NOTIFY limitChanged)
+    Q_PROPERTY(double tripMs READ tripMs WRITE setTripMs NOTIFY limitChanged)
+    Q_PROPERTY(QStringList responseNames READ responseNames CONSTANT)
     Q_PROPERTY(bool overLimit READ overLimit NOTIFY updated)
+    Q_PROPERTY(double totalMa READ totalMa NOTIFY updated)
+    Q_PROPERTY(QString recentEvent READ recentEvent NOTIFY updated)
+    Q_PROPERTY(QString lastEventText READ lastEventText NOTIFY eventChanged)
 
 public:
+    // what happens when a joint current stays above its limit
+    enum Response { Warn = 0, Disable = 1, Retract = 2, Hold = 3 };
+    Q_ENUM(Response)
+    // who reacts: the app (serial, ~50 Hz) or the firmware (1 kHz, command `I`)
+    enum Source { App = 0, Firmware = 1 };
+    Q_ENUM(Source)
+
     explicit Telemetry(HandModel *hand, QObject *parent = nullptr);
 
     bool hasData() const { return m_hasData; }
@@ -75,11 +90,26 @@ public:
     QVariantMap fields() const { return m_fields; }
     QString firmwareId() const { return m_fwId; }
     double peakMa() const { return m_peak; }
-    double currentLimitMa() const { return m_limit; }
+    double currentLimitMa() const;
     void setCurrentLimitMa(double l);
-    bool autoDisable() const { return m_autoDisable; }
+    bool autoDisable() const { return m_response == Disable; }
     void setAutoDisable(bool a);
+    int overResponse() const { return m_response; }
+    void setOverResponse(int r);
+    int overSource() const { return m_source; }
+    void setOverSource(int s);
+    double retractDeg() const { return m_retractDeg; }
+    void setRetractDeg(double d);
+    double tripMs() const { return m_tripMs; }
+    void setTripMs(double ms);
+    QStringList responseNames() const;
     bool overLimit() const { return m_overLimit; }
+    // sum of all joint currents (multi-joint log) or the bench current
+    double totalMa() const { return m_totalMa; }
+    // "RETR" / "HOLD" / "TRIP" / "WARN" for 3 s after an over-current reaction
+    QString recentEvent() const;
+    QString lastEventText() const { return m_eventText; }
+    Q_INVOKABLE void noteEvent(const QString &code, const QString &text);
 
     Q_INVOKABLE void resetPeak();
     Q_INVOKABLE void reset();
@@ -95,9 +125,10 @@ signals:
     void rateChanged();
     void firmwareIdChanged();
     void limitChanged();
+    void eventChanged();
     // names/values after adding derived channels (deg), for the live plot
     void sample(double t, const QStringList &names, const QVector<double> &values);
-    void overCurrent(double ma);
+    void overCurrent(int joint, double ma);
     void configFromFirmware(int joints, double cnt90);
 
 private:
@@ -114,9 +145,16 @@ private:
     QVariantMap m_fields;
     QString m_fwId;
     double m_peak = 0;
-    double m_limit = 300;
-    bool m_autoDisable = false;
+    int m_response = Warn;
+    int m_source = App;
+    double m_retractDeg = 10;
+    double m_tripMs = 300;
     bool m_overLimit = false;
+    quint32 m_overMask = 0;
+    double m_totalMa = 0;
+    QString m_event;
+    QString m_eventText;
+    QElapsedTimer m_eventClock;
     int m_count = 0;
     struct PosSample { double t; double pos; };
     QVector<PosSample> m_posHist;

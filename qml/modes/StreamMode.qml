@@ -85,9 +85,54 @@ Item {
                         }
                     }
                     Section {
+                        title: qsTr("Input Processing")
+                        FormRow {
+                            label: qsTr("Handed"); labelWidth: 110
+                            FlatCombo { Layout.fillWidth: true; model: root.st.handedNames; currentIndex: root.st.handed; onActivated: (i) => root.st.handed = i }
+                        }
+                        FormRow {
+                            label: qsTr("Sampling Rate"); labelWidth: 110
+                            NumberField { Layout.fillWidth: true; value: root.st.sendRate; decimals: 0; from: 1; to: 200; unit: "Hz"; onCommitted: (v) => root.st.sendRate = v }
+                        }
+                        FormRow {
+                            label: qsTr("Filter Frequency"); labelWidth: 110
+                            NumberField { Layout.fillWidth: true; value: root.st.filterHz; decimals: 1; from: 0; to: 100; unit: "Hz"; onCommitted: (v) => root.st.filterHz = v }
+                        }
+                        FormRow {
+                            label: qsTr("Averaging (mean)"); labelWidth: 110
+                            NumberField { Layout.fillWidth: true; value: root.st.averageN; decimals: 0; from: 1; to: 100; unit: qsTr("mẫu"); onCommitted: (v) => root.st.averageN = v }
+                        }
+                        FormRow {
+                            label: qsTr("Max Velocity"); labelWidth: 110
+                            NumberField { Layout.fillWidth: true; value: root.st.maxVel; decimals: 0; from: 0; to: 10000; unit: "°/s"; onCommitted: (v) => root.st.maxVel = v }
+                        }
+                        FormRow {
+                            label: qsTr("Max Acceleration"); labelWidth: 110
+                            NumberField { Layout.fillWidth: true; value: root.st.maxAccel; decimals: 0; from: 0; to: 100000; unit: "°/s²"; onCommitted: (v) => root.st.maxAccel = v }
+                        }
+                        TextLabel {
+                            Layout.fillWidth: true
+                            font.pixelSize: Theme.fontTiny
+                            muted: true
+                            wrapMode: Text.WordWrap
+                            elide: Text.ElideNone
+                            text: qsTr("0 = tắt. Thứ tự: trung bình N khung → lọc thông thấp → giới hạn tốc độ/gia tốc. Handed lọc khung có \"hand\":\"left|right\" hoặc tiền tố L / R.")
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            FlatButton { Layout.fillWidth: true; text: qsTr("Reset lọc"); onClicked: root.st.resetProcessing() }
+                            FlatButton { Layout.fillWidth: true; text: qsTr("Save Settings"); iconPath: Icons.save; onClicked: Core.saveNow() }
+                        }
+                    }
+                    Section {
                         title: qsTr("Details")
                         FormRow { label: qsTr("FPS"); labelWidth: 80; ValueBox { Layout.fillWidth: true; text: root.st.fps.toFixed(0) } }
                         FormRow { label: qsTr("Frames"); labelWidth: 80; ValueBox { Layout.fillWidth: true; text: root.st.frames } }
+                        FormRow {
+                            visible: root.st.skippedFrames > 0
+                            label: qsTr("Bỏ qua"); labelWidth: 80
+                            ValueBox { Layout.fillWidth: true; text: root.st.skippedFrames + qsTr(" (khác tay)") }
+                        }
                         FormRow {
                             label: qsTr("Nguồn"); labelWidth: 80
                             ValueBox { Layout.fillWidth: true; text: root.st.lastSender.length ? root.st.lastSender : "—"; pixelSize: Theme.fontSmall }
@@ -197,7 +242,8 @@ Item {
                             model: Core.hand.joints
                             ColumnLayout {
                                 id: barCol
-                                readonly property var outVal: root.st.output[index]
+                                readonly property var outVal: root.st.processed[index]
+                                readonly property var inVal: root.st.output[index]
                                 readonly property bool has: outVal !== undefined && outVal !== null
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
@@ -225,6 +271,15 @@ Item {
                                         height: parent.frac * parent.height
                                         radius: 2
                                         color: Theme.barFill
+                                    }
+                                    // raw input (before processing)
+                                    Rectangle {
+                                        readonly property real f: (barCol.inVal !== undefined && barCol.inVal !== null) ? Math.max(0, Math.min(1, (barCol.inVal - modelData.minDeg) / Math.max(1e-6, modelData.maxDeg - modelData.minDeg))) : -1
+                                        visible: f >= 0
+                                        anchors.horizontalCenter: parent.horizontalCenter
+                                        y: (1 - f) * parent.height - 1
+                                        width: 16; height: 2
+                                        color: Theme.textSecondary
                                     }
                                     TextLabel {
                                         x: parent.width / 2 + 8

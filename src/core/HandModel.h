@@ -24,6 +24,9 @@ class Joint : public QObject
     Q_PROPERTY(double peakMa READ peakMa NOTIFY stateChanged)
     Q_PROPERTY(double commandDeg READ commandDeg WRITE setCommandDeg NOTIFY commandChanged)
     Q_PROPERTY(double previewDeg READ previewDeg NOTIFY previewChanged)
+    Q_PROPERTY(double rawCounts READ rawCounts NOTIFY stateChanged)
+    Q_PROPERTY(double currentLimitMa READ currentLimitMa WRITE setCurrentLimitMa NOTIFY configChanged)
+    Q_PROPERTY(bool overLimit READ overLimit NOTIFY stateChanged)
 
 public:
     Joint(int index, const QString &key, const QString &name, QObject *parent = nullptr);
@@ -54,11 +57,17 @@ public:
     // What the 3D view shows: measured if we have feedback, else the last command.
     double previewDeg() const { return m_hasFeedback ? m_measured : m_command; }
 
+    // encoder counts of the last feedback (before the cnt/90 scaling), for calibration
+    double rawCounts() const { return m_raw; }
+    double currentLimitMa() const { return m_limit; }
+    void setCurrentLimitMa(double l);
+    bool overLimit() const { return m_hasCurrent && qAbs(m_current) > m_limit; }
+
     double countsToDeg(double c) const { return c * 90.0 / m_cnt90; }
     double degToCounts(double d) const { return d * m_cnt90 / 90.0; }
     double clamp(double d) const { return qBound(m_min, d, m_max); }
 
-    void setFeedback(double measuredDeg, double targetDeg);
+    void setFeedback(double measuredDeg, double targetDeg, double rawCounts = qQNaN());
     void setCurrent(double ma);
     void clearFeedback();
     Q_INVOKABLE void resetPeak();
@@ -87,6 +96,9 @@ private:
     double m_current = 0;
     double m_peak = 0;
     double m_command = 0;
+    double m_raw = 0;
+    double m_limit = 300;
+    bool m_hasCurrent = false;
 };
 
 // The 6 joints of CyberHand, ordered as on the board: T2, T1, I, M, R, P.

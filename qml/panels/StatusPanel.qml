@@ -32,12 +32,13 @@ Card {
             Layout.fillWidth: true
             title: qsTr("Status")
             collapsible: false
-            Led { on: root.live; y: 6 }
             TextLabel {
-                text: root.live ? root.tel.sampleRate.toFixed(0) + " Hz" : qsTr("offline")
+                text: root.live ? root.tel.sampleRate.toFixed(0) + " Hz" : ""
                 secondary: true
                 font.pixelSize: Theme.fontSmall
+                y: 4
             }
+            StatusLight { compact: true; y: 2 }
         }
 
         GridLayout {
@@ -259,9 +260,12 @@ Card {
                     TextLabel { text: qsTr("Status"); Layout.fillWidth: true }
                     Badge {
                         readonly property bool bad: root.tel.overLimit || root.tel.flt || root.tel.diagLow
-                        text: !root.live ? "—" : (root.tel.overLimit ? "HIGH" : ((root.tel.flt || root.tel.diagLow) ? "FAULT" : (root.tel.noMotion ? "STALL" : "OK")))
-                        fill: !root.live ? Theme.bgSunken : (bad ? Theme.liveRed : (root.tel.noMotion ? Theme.warnAmber : Theme.infoBlue))
+                        readonly property string ev: root.tel.recentEvent
+                        text: !root.live ? "—" : (ev.length ? ev : (root.tel.overLimit ? "HIGH" : ((root.tel.flt || root.tel.diagLow) ? "FAULT" : (root.tel.noMotion ? "STALL" : "OK"))))
+                        fill: !root.live ? Theme.bgSunken : (ev.length ? Theme.warnAmber : (bad ? Theme.liveRed : (root.tel.noMotion ? Theme.warnAmber : Theme.infoBlue)))
                         textColor: !root.live ? Theme.textMuted : Theme.textOnAccent
+                        HoverHandler { id: evHover }
+                        Tip { visible: evHover.hovered && root.tel.lastEventText.length > 0; text: root.tel.lastEventText }
                     }
                 }
                 Item { Layout.fillHeight: true }

@@ -17,6 +17,11 @@ StreamServer::StreamServer(HandModel *hand, QObject *parent)
     m_out = QVector<double>(n, qQNaN());
     m_calMin = QVector<double>(n, qQNaN());
     m_calMax = QVector<double>(n, qQNaN());
+    m_hist = QVector<QVector<double>>(n);
+    m_avg = QVector<double>(n, qQNaN());
+    m_lp = QVector<double>(n, qQNaN());
+    m_proc = QVector<double>(n, qQNaN());
+    m_vel = QVector<double>(n, 0.0);
 
     connect(&m_sock, &QUdpSocket::readyRead, this, &StreamServer::onReadyRead);
     m_sendTimer.setTimerType(Qt::PreciseTimer);
@@ -114,6 +119,111 @@ static QVariantList toList(const QVector<double> &v)
 }
 
 QVariantList StreamServer::raw() const { return toList(m_raw); }
+QVariantList StreamServer::processed() const { return toList(m_proc); }
+
+QStringList StreamServer::handedNames() const
+{
+    return {tr("Bất kỳ"), tr("Phải"), tr("Trái")};
+}
+
+void StreamServer::setHanded(int h)
+{
+    h = qBound(0, h, 2);
+    if (h == m_handed)
+        return;
+    m_handed = h;
+    emit processingChanged();
+}
+
+void StreamServer::setAverageN(int n)
+{
+    n = qBound(1, n, 100);
+    if (n == m_avgN)
+        return;
+    m_avgN = n;
+    emit processingChanged();
+}
+
+void StreamServer::setFilterHz(double f)
+{
+    f = qBound(0.0, f, 100.0);
+    if (qFuzzyCompare(f + 1, m_filterHz + 1))
+        return;
+    m_filterHz = f;
+    emit processingChanged();
+}
+
+void StreamServer::setMaxVel(double v)
+{
+    v = qBound(0.0, v, 10000.0);
+    if (qFuzzyCompare(v + 1, m_maxVel + 1))
+        return;
+    m_maxVel = v;
+    emit processingChanged();
+}
+
+void StreamServer::setMaxAccel(double a)
+{
+    a = qBound(0.0, a, 100000.0);
+    if (qFuzzyCompare(a + 1, m_maxAcc + 1))
+        return;
+    m_maxAcc = a;
+    emit processingChanged();
+}
+
+void StreamServer::resetProcessing()
+{
+    for (auto &h : m_hist)
+        h.clear();
+    m_avg.fill(qQNaN());
+    m_lp.fill(qQNaN());
+    m_proc.fill(qQNaN());
+    m_vel.fill(0.0);
+    m_haveFrame = false;
+    emit processedChanged();
+}
+
+void StreamServer::processStep(double dt)
+{
+    dt = qMax(1e-4, dt);
+    const double alpha = m_filterHz > 0 ? 1.0 - std::exp(-2.0 * M_PI * m_filterHz * dt) : 1.0;
+    for (int i = 0; i < m_avg.size(); ++i) {
+        const double x = m_avg[i];
+        if (qIsNaN(x))
+            continue;
+        // low-pass
+        if (qIsNaN(m_lp[i]))
+            m_lp[i] = x;
+        else
+            m_lp[i] += alpha * (x - m_lp[i]);
+        // rate limits
+        if (qIsNaN(m_proc[i]) || (m_maxVel <= 0 && m_maxAcc <= 0)) {
+            m_vel[i] = qIsNaN(m_proc[i]) ? 0.0 : (m_lp[i] - m_proc[i]) / dt;
+            m_proc[i] = m_lp[i];
+            continue;
+        }
+        const double e = m_lp[i] - m_proc[i];
+        double vdes = e / dt;
+        if (m_maxVel > 0)
+            vdes = qBound(-m_maxVel, vdes, m_maxVel);
+        if (m_maxAcc > 0) {
+            // no overshoot: never faster than what can still stop at the target
+            const double vstop = std::sqrt(2.0 * m_maxAcc * qAbs(e));
+            vdes = qBound(-vstop, vdes, vstop);
+            const double dv = qBound(-m_maxAcc * dt, vdes - m_vel[i], m_maxAcc * dt);
+            m_vel[i] += dv;
+        } else {
+            m_vel[i] = vdes;
+        }
+        double next = m_proc[i] + m_vel[i] * dt;
+        // do not step past the target
+        if ((e > 0 && next > m_lp[i]) || (e < 0 && next < m_lp[i])) {
+            next = m_lp[i];
+            m_vel[i] = 0;
+        }
+        m_proc[i] = next;
+    }
+}
 QVariantList StreamServer::output() const { return toList(m_out); }
 QVariantList StreamServer::calMin() const { return toList(m_calMin); }
 QVariantList StreamServer::calMax() const { return toList(m_calMax); }
@@ -165,25 +275,44 @@ void StreamServer::onReadyRead()
     while (m_sock.hasPendingDatagrams()) {
         const QNetworkDatagram dg = m_sock.receiveDatagram();
         QVector<double> raw;
-        if (parseFrame(dg.data(), &raw))
-            handleFrame(raw, dg.senderAddress().toString() + QLatin1Char(':') + QString::number(dg.senderPort()));
+        int hand = AnyHand;
+        if (!parseFrame(dg.data(), &raw, &hand))
+            continue;
+        if (m_handed != AnyHand && hand != AnyHand && hand != m_handed) {
+            ++m_skipped;
+            continue;
+        }
+        handleFrame(raw, dg.senderAddress().toString() + QLatin1Char(':') + QString::number(dg.senderPort()));
     }
 }
 
 bool StreamServer::injectText(const QString &text, const QString &sender)
 {
     QVector<double> raw;
-    if (!parseFrame(text.toUtf8(), &raw))
+    int hand = AnyHand;
+    if (!parseFrame(text.toUtf8(), &raw, &hand))
         return false;
+    if (m_handed != AnyHand && hand != AnyHand && hand != m_handed) {
+        ++m_skipped;
+        return true;
+    }
     handleFrame(raw, sender);
     return true;
 }
 
-bool StreamServer::parseFrame(const QByteArray &data, QVector<double> *out) const
+bool StreamServer::parseFrame(const QByteArray &data, QVector<double> *out, int *hand) const
 {
     const int n = m_hand->count();
     out->fill(qQNaN(), n);
-    const QByteArray trimmed = data.trimmed();
+    QByteArray trimmed = data.trimmed();
+    if (hand)
+        *hand = AnyHand;
+    // "L ..." / "R ..." prefix
+    if (trimmed.size() > 2 && (trimmed[0] == 'L' || trimmed[0] == 'R') && (trimmed[1] == ' ' || trimmed[1] == ':' || trimmed[1] == ';')) {
+        if (hand)
+            *hand = trimmed[0] == 'L' ? LeftHand : RightHand;
+        trimmed = trimmed.mid(2).trimmed();
+    }
     if (trimmed.isEmpty())
         return false;
     bool any = false;
@@ -196,6 +325,11 @@ bool StreamServer::parseFrame(const QByteArray &data, QVector<double> *out) cons
             arr = doc.array();
         } else {
             const QJsonObject o = doc.object();
+            const QString side = o.value(QStringLiteral("hand")).toString().toLower();
+            if (hand && side.startsWith(QLatin1Char('l')))
+                *hand = LeftHand;
+            else if (hand && side.startsWith(QLatin1Char('r')))
+                *hand = RightHand;
             if (o.contains(QStringLiteral("q")))
                 arr = o.value(QStringLiteral("q")).toArray();
             for (auto it = o.begin(); it != o.end(); ++it) {
@@ -261,7 +395,16 @@ void StreamServer::handleFrame(const QVector<double> &raw, const QString &sender
             m_calMax[i] = qIsNaN(m_calMax[i]) ? raw[i] : qMax(m_calMax[i], raw[i]);
         }
         m_out[i] = mapValue(i, raw[i]);
+        QVector<double> &h = m_hist[i];
+        h.append(m_out[i]);
+        while (h.size() > m_avgN)
+            h.removeFirst();
+        double sum = 0;
+        for (double x : h)
+            sum += x;
+        m_avg[i] = sum / h.size();
     }
+    m_haveFrame = true;
     ++m_frames;
     ++m_framesWindow;
     m_sender = sender;
@@ -274,12 +417,20 @@ void StreamServer::handleFrame(const QVector<double> &raw, const QString &sender
 
 void StreamServer::onSendTick()
 {
-    if (!m_pending)
+    if (!m_haveFrame)
         return;
+    const QVector<double> before = m_proc;
+    processStep(1.0 / m_rate);
+    bool moved = m_pending;
+    for (int i = 0; i < m_proc.size() && !moved; ++i)
+        moved = qIsNaN(before[i]) != qIsNaN(m_proc[i]) || (!qIsNaN(m_proc[i]) && qAbs(before[i] - m_proc[i]) > 1e-3);
     m_pending = false;
-    emit preview(m_out);
+    if (!moved)
+        return;
+    emit processedChanged();
+    emit preview(m_proc);
     if (m_mirror)
-        emit forward(m_out);
+        emit forward(m_proc);
 }
 
 void StreamServer::startCalibration()
@@ -316,7 +467,10 @@ QJsonObject StreamServer::toJson() const
     }
     return {{QStringLiteral("port"), m_port}, {QStringLiteral("unit"), m_unit},
             {QStringLiteral("sendRate"), m_rate}, {QStringLiteral("calMin"), mn},
-            {QStringLiteral("calMax"), mx}, {QStringLiteral("calibratedAt"), m_calAt}};
+            {QStringLiteral("calMax"), mx}, {QStringLiteral("calibratedAt"), m_calAt},
+            {QStringLiteral("handed"), m_handed}, {QStringLiteral("averageN"), m_avgN},
+            {QStringLiteral("filterHz"), m_filterHz}, {QStringLiteral("maxVel"), m_maxVel},
+            {QStringLiteral("maxAccel"), m_maxAcc}};
 }
 
 void StreamServer::fromJson(const QJsonObject &o)
@@ -331,5 +485,10 @@ void StreamServer::fromJson(const QJsonObject &o)
         m_calMax[i] = mx.at(i).isDouble() ? mx.at(i).toDouble() : qQNaN();
     }
     m_calAt = o.value(QStringLiteral("calibratedAt")).toString();
+    setHanded(o.value(QStringLiteral("handed")).toInt(m_handed));
+    setAverageN(o.value(QStringLiteral("averageN")).toInt(m_avgN));
+    setFilterHz(o.value(QStringLiteral("filterHz")).toDouble(m_filterHz));
+    setMaxVel(o.value(QStringLiteral("maxVel")).toDouble(m_maxVel));
+    setMaxAccel(o.value(QStringLiteral("maxAccel")).toDouble(m_maxAcc));
     emit calibrationChanged();
 }

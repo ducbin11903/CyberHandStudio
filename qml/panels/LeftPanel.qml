@@ -202,19 +202,75 @@ Card {
                         Item { Layout.fillWidth: true }
                     }
                     FormRow {
-                        label: qsTr("Current Limit")
+                        label: qsTr("Power Sample Rate")
                         NumberField {
                             Layout.preferredWidth: 90
-                            value: Core.telemetry.currentLimitMa; decimals: 0; from: 1; to: 5000; unit: "mA"
-                            onCommitted: (v) => Core.telemetry.currentLimitMa = v
+                            value: Core.ctrl.powerRate; decimals: 0; from: 1; to: 1000; unit: "Hz"
+                            onCommitted: (v) => Core.ctrl.powerRate = v
                         }
-                        FlatCheck {
-                            text: qsTr("Tự tắt")
-                            checked: Core.telemetry.autoDisable
-                            onToggled: Core.telemetry.autoDisable = checked
-                            Tip { visible: parent.hovered; text: qsTr("Vượt ngưỡng thì dừng phát và gửi  d") }
+                        FlatButton { text: qsTr("Update"); tip: qsTr("Gửi  a <hz>: firmware lấy trung bình dòng trong 1/hz giây"); onClicked: Core.ctrl.applyPowerRate() }
+                        Item { Layout.fillWidth: true }
+                    }
+                }
+
+                // ---- Safety (over-current) --------------------------------
+                Section {
+                    title: qsTr("Safety")
+                    FormRow {
+                        label: qsTr("Current Limit") + (root.bench ? " · " + root.bench.key : "")
+                        NumberField {
+                            Layout.preferredWidth: 90
+                            value: root.bench ? root.bench.currentLimitMa : 300; decimals: 0; from: 1; to: 5000; unit: "mA"
+                            onCommitted: (v) => { if (root.bench) root.bench.currentLimitMa = v }
+                        }
+                        TextLabel { text: qsTr("khớp khác: bảng Joints"); muted: true; font.pixelSize: Theme.fontTiny; Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Khi quá dòng")
+                        FlatCombo {
+                            Layout.fillWidth: true
+                            model: Core.telemetry.responseNames
+                            currentIndex: Core.telemetry.overResponse
+                            onActivated: (i) => Core.telemetry.overResponse = i
+                        }
+                    }
+                    FormRow {
+                        label: qsTr("Lùi / giữ ngưỡng")
+                        NumberField {
+                            Layout.preferredWidth: 80
+                            value: Core.telemetry.retractDeg; decimals: 1; from: 0.5; to: 90; unit: "°"
+                            onCommitted: (v) => Core.telemetry.retractDeg = v
+                        }
+                        NumberField {
+                            Layout.preferredWidth: 80
+                            value: Core.telemetry.tripMs; decimals: 0; from: 1; to: 5000; unit: "ms"
+                            onCommitted: (v) => Core.telemetry.tripMs = v
                         }
                         Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Xử lý tại")
+                        SegmentToggle {
+                            options: [qsTr("App"), qsTr("Firmware")]
+                            currentIndex: Core.telemetry.overSource
+                            onActivated: (i) => Core.telemetry.overSource = i
+                        }
+                        FlatButton {
+                            text: qsTr("Ghi FW")
+                            tip: qsTr("Gửi  I <mA> <ms> <kiểu> <độ>  (firmware ≥ 0.5)")
+                            onClicked: Core.pushProtection()
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    TextLabel {
+                        Layout.fillWidth: true
+                        font.pixelSize: Theme.fontTiny
+                        muted: true
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                        text: Core.telemetry.overSource === 0
+                              ? qsTr("App: phản ứng qua serial (~50 Hz), dừng cả phát / stream / controller.")
+                              : qsTr("Firmware: phản ứng ở 1 kHz sau %1 ms quá ngưỡng, báo về dòng OVERI:. Tự ghi khi kết nối.").arg(Math.round(Core.telemetry.tripMs))
                     }
                 }
 
@@ -362,6 +418,7 @@ Card {
                         TextLabel { text: qsTr("cnt/vòng"); secondary: true; Layout.preferredWidth: 62; font.pixelSize: Theme.fontSmall }
                         TextLabel { text: qsTr("min°"); secondary: true; Layout.preferredWidth: 44; font.pixelSize: Theme.fontSmall }
                         TextLabel { text: qsTr("max°"); secondary: true; Layout.preferredWidth: 44; font.pixelSize: Theme.fontSmall }
+                        TextLabel { text: qsTr("mA"); secondary: true; Layout.preferredWidth: 48; font.pixelSize: Theme.fontSmall }
                     }
                     Repeater {
                         model: root.hand.joints
@@ -375,6 +432,7 @@ Card {
                             NumberField { Layout.preferredWidth: 62; value: modelData.countsPerRev; decimals: 0; from: 1; to: 10000000; onCommitted: (v) => modelData.countsPerRev = v }
                             NumberField { Layout.preferredWidth: 44; value: modelData.minDeg; decimals: 0; from: -180; to: 180; onCommitted: (v) => modelData.minDeg = v }
                             NumberField { Layout.preferredWidth: 44; value: modelData.maxDeg; decimals: 0; from: -180; to: 180; onCommitted: (v) => modelData.maxDeg = v }
+                            NumberField { Layout.preferredWidth: 48; value: modelData.currentLimitMa; decimals: 0; from: 1; to: 5000; onCommitted: (v) => modelData.currentLimitMa = v }
                         }
                     }
                 }
@@ -429,6 +487,15 @@ Card {
                         label: qsTr("Lưới sàn")
                         FlatCheck { checked: Core.ui.showFloor !== false; onToggled: Core.setUiValue("showFloor", checked) }
                         Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Visual Refresh Rate")
+                        NumberField {
+                            Layout.preferredWidth: 90
+                            value: Core.refreshHz; decimals: 0; from: 1; to: 144; unit: "Hz"
+                            onCommitted: (v) => Core.refreshHz = v
+                        }
+                        TextLabel { text: qsTr("đồ thị + 3D"); muted: true; font.pixelSize: Theme.fontTiny; Layout.fillWidth: true }
                     }
                 }
                 Item { Layout.preferredHeight: 8 }

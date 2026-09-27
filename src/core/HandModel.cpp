@@ -66,9 +66,21 @@ void Joint::setCommandDeg(double d)
         emit previewChanged();
 }
 
-void Joint::setFeedback(double measuredDeg, double targetDeg)
+void Joint::setCurrentLimitMa(double l)
+{
+    l = qMax(1.0, l);
+    if (l == m_limit)
+        return;
+    m_limit = l;
+    emit configChanged();
+    emit stateChanged();
+}
+
+void Joint::setFeedback(double measuredDeg, double targetDeg, double rawCounts)
 {
     const bool had = m_hasFeedback;
+    if (!qIsNaN(rawCounts))
+        m_raw = rawCounts;
     m_measured = measuredDeg;
     m_target = targetDeg;
     m_hasFeedback = true;
@@ -80,6 +92,7 @@ void Joint::setFeedback(double measuredDeg, double targetDeg)
 void Joint::setCurrent(double ma)
 {
     m_current = ma;
+    m_hasCurrent = true;
     if (qAbs(ma) > m_peak)
         m_peak = qAbs(ma);
     emit stateChanged();
@@ -91,6 +104,7 @@ void Joint::clearFeedback()
         return;
     m_hasFeedback = false;
     m_current = 0;
+    m_hasCurrent = false;
     emit stateChanged();
     emit previewChanged();
 }
@@ -111,6 +125,7 @@ QJsonObject Joint::toJson() const
         {QStringLiteral("minDeg"), m_min},
         {QStringLiteral("maxDeg"), m_max},
         {QStringLiteral("enabled"), m_enabled},
+        {QStringLiteral("currentLimitMa"), m_limit},
     };
 }
 
@@ -129,6 +144,7 @@ void Joint::fromJson(const QJsonObject &o)
     m_min = o.value(QStringLiteral("minDeg")).toDouble(m_min);
     m_max = o.value(QStringLiteral("maxDeg")).toDouble(m_max);
     m_enabled = o.value(QStringLiteral("enabled")).toBool(m_enabled);
+    m_limit = qMax(1.0, o.value(QStringLiteral("currentLimitMa")).toDouble(m_limit));
     emit configChanged();
 }
 

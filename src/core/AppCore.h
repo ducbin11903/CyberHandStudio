@@ -6,6 +6,7 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include "Calibration.h"
 #include "ConfigStore.h"
 #include "ConsoleModel.h"
 #include "GamepadInput.h"
@@ -44,6 +45,10 @@ class AppCore : public QObject
     Q_PROPERTY(LlmClient *llm READ llm CONSTANT)
     Q_PROPERTY(MacroRunner *macros READ macros CONSTANT)
     Q_PROPERTY(ConfigStore *config READ config CONSTANT)
+    Q_PROPERTY(Calibration *calibration READ calibration CONSTANT)
+    Q_PROPERTY(double refreshHz READ refreshHz WRITE setRefreshHz NOTIFY refreshHzChanged)
+    Q_PROPERTY(QString runState READ runState NOTIFY runStateChanged)
+    Q_PROPERTY(bool firmwareConfigurable READ firmwareConfigurable NOTIFY firmwareConfigurableChanged)
     Q_PROPERTY(QString activeMode READ activeMode WRITE setActiveMode NOTIFY activeModeChanged)
     Q_PROPERTY(QVariantMap ui READ ui WRITE setUi NOTIFY uiChanged)
     Q_PROPERTY(QUrl documentsFolder READ documentsFolder CONSTANT)
@@ -75,6 +80,16 @@ public:
     LlmClient *llm() const { return m_llm; }
     MacroRunner *macros() const { return m_macros; }
     ConfigStore *config() const { return m_config; }
+    Calibration *calibration() const { return m_calib; }
+    // Visual Refresh Rate: plots and the 3D view
+    double refreshHz() const { return m_refreshHz; }
+    void setRefreshHz(double hz);
+    // OFFLINE / IDLE / READY / RUN / FAULT for the big status light
+    QString runState() const;
+    // firmware answered `i` with cnt90= (supports j / I / a)
+    bool firmwareConfigurable() const { return m_fwConfigurable; }
+    // push the over-current settings of the main joint to the firmware (`I`)
+    Q_INVOKABLE bool pushProtection();
     QString activeMode() const { return m_mode; }
     void setActiveMode(const QString &m);
     QVariantMap ui() const { return m_ui; }
@@ -89,12 +104,16 @@ public:
 signals:
     void activeModeChanged();
     void uiChanged();
+    void refreshHzChanged();
+    void runStateChanged();
+    void firmwareConfigurableChanged();
 
 private:
     void onLine(const QString &line, double t);
     QJsonObject collect() const;
     void apply(const QJsonObject &o);
     void installExamples();
+    void onOverCurrent(int joint, double ma);
 
     SerialLink *m_link;
     ConsoleModel *m_console;
@@ -114,6 +133,10 @@ private:
     LlmClient *m_llm;
     MacroRunner *m_macros;
     ConfigStore *m_config;
+    Calibration *m_calib;
+    double m_refreshHz = 30;
+    bool m_fwConfigurable = false;
+    QTimer m_idTimer;
     QString m_mode = QStringLiteral("text");
     QVariantMap m_ui;
     QTimer m_compileTimer;

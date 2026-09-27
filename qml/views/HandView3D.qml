@@ -21,6 +21,20 @@ Card {
         for (var i = 0; i < joints.length; ++i) a.push(joints[i].previewDeg)
         return a
     }
+    // redrawn at the Visual Refresh Rate instead of on every telemetry line
+    property var shownAngles: [0, 0, 0, 0, 0, 0]
+    property var shownTargets: [0, 0, 0, 0, 0, 0]
+    Component.onCompleted: { shownAngles = previewAngles(); shownTargets = targetAngles() }
+    Timer {
+        interval: Math.max(7, Math.round(1000 / Core.refreshHz))
+        running: true
+        repeat: true
+        onTriggered: {
+            var a = root.previewAngles(), t = root.targetAngles()
+            if (JSON.stringify(a) !== JSON.stringify(root.shownAngles)) root.shownAngles = a
+            if (JSON.stringify(t) !== JSON.stringify(root.shownTargets)) root.shownTargets = t
+        }
+    }
     function targetAngles() {
         var a = []
         for (var i = 0; i < joints.length; ++i)
@@ -79,12 +93,12 @@ Card {
 
         HandRig {
             id: hand
-            angles: root.previewAngles()
+            angles: root.shownAngles
         }
         HandRig {
             id: ghost
             visible: root.showGhost && (root.anyFeedback || Core.player.playing)
-            angles: root.targetAngles()
+            angles: root.shownTargets
             color: Theme.infoBlue
             jointColor: Theme.infoBlue
             opacity: 0.22

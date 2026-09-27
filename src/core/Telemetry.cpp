@@ -8,6 +8,71 @@ Telemetry::Telemetry(HandModel *hand, QObject *parent)
     : QObject(parent), m_hand(hand)
 {
     m_rateClock.start();
+    // the "current limit" shown in the status panel is the main joint's own limit
+    connect(m_hand, &HandModel::benchJointChanged, this, &Telemetry::limitChanged);
+    for (int i = 0; i < m_hand->count(); ++i)
+        connect(m_hand->joint(i), &Joint::configChanged, this, &Telemetry::limitChanged);
+}
+
+double Telemetry::currentLimitMa() const
+{
+    const Joint *j = m_hand->joint(m_hand->benchJoint());
+    return j ? j->currentLimitMa() : 300.0;
+}
+
+QStringList Telemetry::responseNames() const
+{
+    return {tr("Cảnh báo"), tr("Tắt driver"), tr("Lùi (RETR)"), tr("Giữ tại chỗ")};
+}
+
+void Telemetry::setOverResponse(int r)
+{
+    r = qBound(0, r, 3);
+    if (r == m_response)
+        return;
+    m_response = r;
+    emit limitChanged();
+}
+
+void Telemetry::setOverSource(int s)
+{
+    s = qBound(0, s, 1);
+    if (s == m_source)
+        return;
+    m_source = s;
+    emit limitChanged();
+}
+
+void Telemetry::setRetractDeg(double d)
+{
+    d = qBound(0.5, d, 90.0);
+    if (qFuzzyCompare(d, m_retractDeg))
+        return;
+    m_retractDeg = d;
+    emit limitChanged();
+}
+
+void Telemetry::setTripMs(double ms)
+{
+    ms = qBound(1.0, ms, 5000.0);
+    if (qFuzzyCompare(ms, m_tripMs))
+        return;
+    m_tripMs = ms;
+    emit limitChanged();
+}
+
+QString Telemetry::recentEvent() const
+{
+    return (m_eventClock.isValid() && m_eventClock.elapsed() < 3000) ? m_event : QString();
+}
+
+void Telemetry::noteEvent(const QString &code, const QString &text)
+{
+    m_event = code;
+    m_eventText = text;
+    m_eventClock.start();
+    emit eventChanged();
+    emit updated();
 }
 
 double Telemetry::posDeg() const
@@ -36,19 +101,13 @@ double Telemetry::outputRpm() const
 
 void Telemetry::setCurrentLimitMa(double l)
 {
-    l = qMax(1.0, l);
-    if (l == m_limit)
-        return;
-    m_limit = l;
-    emit limitChanged();
+    if (Joint *j = m_hand->joint(m_hand->benchJoint()))
+        j->setCurrentLimitMa(l);
 }
 
 void Telemetry::setAutoDisable(bool a)
 {
-    if (a == m_autoDisable)
-        return;
-    m_autoDisable = a;
-    emit limitChanged();
+    setOverResponse(a ? Disable : Warn);
 }
 
 void Telemetry::resetPeak()
@@ -71,6 +130,8 @@ void Telemetry::reset()
     m_homed = -1;
     m_peak = 0;
     m_overLimit = false;
+    m_overMask = 0;
+    m_totalMa = 0;
     m_hand->clearFeedback();
     emit homedChanged();
     emit updated();
@@ -125,7 +186,7 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
                 continue;
             const double md = j->countsToDeg(q[i]);
             const double td = qIsNaN(tg[i]) ? md : j->countsToDeg(tg[i]);
-            j->setFeedback(md, td);
+            j->setFeedback(md, td, q[i]);
             outNames << QStringLiteral("%1_deg").arg(j->key());
             outValues << md;
             if (!qIsNaN(cur[i])) {
@@ -134,6 +195,11 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
             }
         }
         m_iMa = maxI;
+        double sum = 0;
+        for (int i = 0; i < 6; ++i)
+            if (!qIsNaN(cur[i]))
+                sum += qAbs(cur[i]);
+        m_totalMa = sum;
         // Status panel follows the selected ("main") joint
         const int b = m_hand->benchJoint();
         if (!qIsNaN(q[b])) {
@@ -152,8 +218,9 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
         if (j) {
             const double md = j->countsToDeg(m_pos);
             const double td = (m_mode == 1) ? j->countsToDeg(m_tgt) : md;
-            j->setFeedback(md, td);
+            j->setFeedback(md, td, m_pos);
             j->setCurrent(m_iMa);
+            m_totalMa = qAbs(m_iMa);
             outNames << QStringLiteral("pos_deg") << QStringLiteral("tgt_deg");
             outValues << md << ((m_mode == 1) ? td : qQNaN());
         }
@@ -173,10 +240,19 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
 
     if (qAbs(m_iMa) > m_peak)
         m_peak = qAbs(m_iMa);
-    const bool over = qAbs(m_iMa) > m_limit;
-    if (over && !m_overLimit)
-        emit overCurrent(m_iMa);
-    m_overLimit = over;
+    // each joint against its own limit; rising edge -> overCurrent(joint)
+    quint32 mask = 0;
+    for (int i = 0; i < m_hand->count(); ++i) {
+        const Joint *j = m_hand->joint(i);
+        if (j->overLimit())
+            mask |= (1u << i);
+    }
+    for (int i = 0; i < m_hand->count(); ++i) {
+        if ((mask & (1u << i)) && !(m_overMask & (1u << i)))
+            emit overCurrent(i, m_hand->joint(i)->currentMa());
+    }
+    m_overMask = mask;
+    m_overLimit = mask != 0;
 
     m_hasData = true;
     ++m_count;
@@ -203,6 +279,14 @@ void Telemetry::processText(const QString &line)
             m_homed = 0;
         if (prev != m_homed)
             emit homedChanged();
+    } else if (s.startsWith(QLatin1String("OVERI:"), Qt::CaseInsensitive)) {
+        // firmware reaction: "OVERI: retract i=412 mA ..." / hold / trip / warn
+        const QString what = s.mid(6).trimmed().section(QLatin1Char(' '), 0, 0).toLower();
+        QString code = QStringLiteral("TRIP");
+        if (what.startsWith(QLatin1String("retr"))) code = QStringLiteral("RETR");
+        else if (what.startsWith(QLatin1String("hold"))) code = QStringLiteral("HOLD");
+        else if (what.startsWith(QLatin1String("warn"))) code = QStringLiteral("WARN");
+        noteEvent(code, s);
     } else if (s.startsWith(QLatin1String("ID:"), Qt::CaseInsensitive)) {
         m_fwId = s.mid(3).trimmed();
         emit firmwareIdChanged();

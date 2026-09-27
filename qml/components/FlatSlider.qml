@@ -20,7 +20,8 @@ Slider {
         radius: 2
         color: Theme.bgDeep
         Rectangle {
-            readonly property real p0: control.centered ? 0.5 : 0
+            // vertical sliders fill up from the bottom (visualPosition 1 = bottom)
+            readonly property real p0: control.centered ? 0.5 : (control.orientation === Qt.Vertical ? 1 : 0)
             readonly property real p1: control.visualPosition
             readonly property real lo: Math.min(p0, p1)
             readonly property real hi: Math.max(p0, p1)
