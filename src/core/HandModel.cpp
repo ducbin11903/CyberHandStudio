@@ -119,8 +119,10 @@ void Joint::fromJson(const QJsonObject &o)
     if (o.contains(QStringLiteral("name")))
         m_name = o.value(QStringLiteral("name")).toString(m_name);
     m_cnt90 = o.value(QStringLiteral("countsPer90")).toDouble(m_cnt90);
-    if (m_cnt90 == 0)
-        m_cnt90 = 937;
+    // 937 was the old N20 calibration (and the app default before 0.1.1): the current
+    // motor is 7 PPR x4 x 1:1000 = 28000 cnt/rev, 90 deg = 7000 cnt
+    if (m_cnt90 == 0 || qFuzzyCompare(m_cnt90, 937.0))
+        m_cnt90 = 7000;
     m_cpr = o.value(QStringLiteral("countsPerRev")).toDouble(m_cpr);
     if (m_cpr <= 0)
         m_cpr = 28000;

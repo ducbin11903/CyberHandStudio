@@ -76,7 +76,7 @@ private:
     int m_index;
     QString m_key;
     QString m_name;
-    double m_cnt90 = 937;
+    double m_cnt90 = 7000; // 28000 cnt/rev output, joint 1:1 -> 90 deg = 7000
     double m_cpr = 28000;
     double m_min = 0;
     double m_max = 90;

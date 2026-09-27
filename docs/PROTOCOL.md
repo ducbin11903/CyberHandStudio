@@ -18,7 +18,7 @@
 
 Dòng log: `en:1,duty:0,out:42.0,i_mA:150,flt:0,diag:1,pos:700,tgt:729,vel:350,mode:1`.
 Dòng chữ (help, `OK`, `ERR`, `HOME:`, `ID:`) không bắt đầu bằng số. `HOME: done` → Homed = Yes.
-`ID: ... joints=N cnt90=937` (nếu firmware có) → app tự đặt cnt/90° cho khớp bench.
+`ID: ... joints=N cnt90=7000` (nếu firmware có) → app tự đặt cnt/90° cho khớp bench.
 
 ### Đề xuất cho 6 khớp (app đã hỗ trợ sẵn)
 

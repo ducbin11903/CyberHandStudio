@@ -27,7 +27,7 @@ private slots:
 
     void parseTextLines()
     {
-        for (const char *s : {"HOME: done", "OK g 45", "ERR bad arg", "USBX: OK", "ID: CyberHand-H562 fw 0.4 joints=1 cnt90=937", "help"}) {
+        for (const char *s : {"HOME: done", "OK g 45", "ERR bad arg", "USBX: OK", "ID: CyberHand-H562 fw 0.4 joints=1 cnt90=7000", "help"}) {
             QVERIFY2(!LineParser::parse(QString::fromLatin1(s)).telemetry, s);
         }
         const ParsedLine p = LineParser::parse(QStringLiteral("1.5,2,-3"));
@@ -47,7 +47,7 @@ private slots:
     {
         HandModel hand;
         Telemetry tel(&hand);
-        const ParsedLine p = LineParser::parse(QStringLiteral("en:1,duty:0,out:42.0,i_mA:150,flt:2,diag:1,pos:937,tgt:468.5,vel:350,mode:1"));
+        const ParsedLine p = LineParser::parse(QStringLiteral("en:1,duty:0,out:42.0,i_mA:150,flt:2,diag:1,pos:7000,tgt:3500,vel:350,mode:1"));
         tel.processTelemetry(0.1, p.names, p.values);
         QCOMPARE(tel.flt(), 2);
         QVERIFY(qAbs(tel.posDeg() - 90.0) < 1e-6);
@@ -64,7 +64,7 @@ private slots:
     {
         HandModel hand;
         Telemetry tel(&hand);
-        const ParsedLine p = LineParser::parse(QStringLiteral("q1:0,q2:937,q3:468.5,q4:0,q5:0,q6:937,i3:120,en:1,flt:0,mode:1"));
+        const ParsedLine p = LineParser::parse(QStringLiteral("q1:0,q2:7000,q3:3500,q4:0,q5:0,q6:7000,i3:120,en:1,flt:0,mode:1"));
         tel.processTelemetry(0.0, p.names, p.values);
         QVERIFY(tel.multiJoint());
         QVERIFY(qAbs(hand.joint(1)->measuredDeg() - 90.0) < 1e-6);

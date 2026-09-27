@@ -17,7 +17,7 @@ import random
 import sys
 import time
 
-CNT90 = 937.0
+CNT90 = 7000.0   # 28000 cnt/rev output (7 PPR x4 x 1:1000), joint 1:1
 
 
 def deg2cnt(d):
@@ -27,7 +27,7 @@ def deg2cnt(d):
 class Motor:
     def __init__(self):
         self.pos = 0.0          # counts (after homing: 0 = extended stop)
-        self.stop = -random.uniform(150, 450)  # mechanical stop, unknown before homing
+        self.stop = -random.uniform(1000, 3000)  # mechanical stop, unknown before homing
         self.speed = 0.0        # counts/s
         self.out = 0.0          # applied duty %
         self.tgt = 0.0
@@ -36,12 +36,12 @@ class Motor:
 
     def step(self, dt, duty):
         self.out = duty
-        vmax = 2000.0           # counts/s at 100 % duty
+        vmax = 7000.0           # counts/s at 100 % duty (15 RPM output)
         tau = 0.08
         target_speed = duty / 100.0 * vmax
         self.speed += (target_speed - self.speed) * min(1.0, dt / tau)
         newpos = self.pos + self.speed * dt
-        hi = self.stop + 1400   # flexion stop
+        hi = self.stop + 7500   # flexion stop
         self.stalled = False
         if newpos <= self.stop:
             newpos = self.stop
