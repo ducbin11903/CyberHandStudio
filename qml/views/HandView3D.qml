@@ -15,6 +15,8 @@ Card {
     }
     property bool showGhost: Core.ui.showGhost !== false
     property bool showFloor: Core.ui.showFloor !== false
+    // CAD model (Visual -> Mô hình 3D) or the block hand
+    readonly property bool useCad: Core.cad.loaded && Core.ui.model3d !== "blocks"
 
     function previewAngles() {
         var a = []
@@ -22,6 +24,7 @@ Card {
         return a
     }
     // redrawn at the Visual Refresh Rate instead of on every telemetry line
+    readonly property bool ghostOn: root.showGhost && (root.anyFeedback || Core.player.playing)
     property var shownAngles: [0, 0, 0, 0, 0, 0]
     property var shownTargets: [0, 0, 0, 0, 0, 0]
     Component.onCompleted: { shownAngles = previewAngles(); shownTargets = targetAngles() }
@@ -57,11 +60,11 @@ Card {
 
         Node {
             id: orbitOrigin
-            position: Qt.vector3d(0, 62, 0)
+            position: Qt.vector3d(0, root.useCad ? 76 : 62, 0)
             eulerRotation: Qt.vector3d(-14, 150, 0)
             PerspectiveCamera {
                 id: camera
-                position: Qt.vector3d(0, 0, 440)
+                position: Qt.vector3d(0, 0, root.useCad ? 520 : 440)
                 clipNear: 5
                 clipFar: 3000
                 fieldOfView: 40
@@ -93,16 +96,30 @@ Card {
 
         HandRig {
             id: hand
+            visible: !root.useCad
             angles: root.shownAngles
         }
         HandRig {
             id: ghost
-            visible: root.showGhost && (root.anyFeedback || Core.player.playing)
+            visible: !root.useCad && root.ghostOn
             angles: root.shownTargets
             color: Theme.infoBlue
             jointColor: Theme.infoBlue
             opacity: 0.22
             showWrist: false
+        }
+        Loader3D {
+            active: root.useCad
+            sourceComponent: CadHandRig { angles: root.shownAngles }
+        }
+        Loader3D {
+            active: root.useCad && root.ghostOn
+            sourceComponent: CadHandRig {
+                angles: root.shownTargets
+                tinted: true
+                color: Theme.infoBlue
+                opacity: 0.22
+            }
         }
     }
 
@@ -125,7 +142,7 @@ Card {
             TextLabel { text: root.anyFeedback ? qsTr("Đo được") : qsTr("Lệnh / mô phỏng"); font.pixelSize: Theme.fontSmall }
         }
         Row {
-            visible: ghost.visible
+            visible: root.ghostOn
             spacing: 5
             Rectangle { width: 10; height: 10; radius: 2; color: Theme.alpha(Theme.infoBlue, 0.5); anchors.verticalCenter: parent.verticalCenter }
             TextLabel { text: qsTr("Đích"); font.pixelSize: Theme.fontSmall }
@@ -148,7 +165,7 @@ Card {
             tip: qsTr("Đặt lại góc nhìn")
             onClicked: {
                 orbitOrigin.eulerRotation = Qt.vector3d(-14, 150, 0)
-                camera.position = Qt.vector3d(0, 0, 440)
+                camera.position = Qt.vector3d(0, 0, root.useCad ? 520 : 440)
             }
         }
     }

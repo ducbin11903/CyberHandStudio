@@ -6,6 +6,7 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include "CadModel.h"
 #include "Calibration.h"
 #include "ConfigStore.h"
 #include "ConsoleModel.h"
@@ -46,6 +47,8 @@ class AppCore : public QObject
     Q_PROPERTY(MacroRunner *macros READ macros CONSTANT)
     Q_PROPERTY(ConfigStore *config READ config CONSTANT)
     Q_PROPERTY(Calibration *calibration READ calibration CONSTANT)
+    Q_PROPERTY(CadModel *cad READ cad CONSTANT)
+    Q_PROPERTY(QString defaultCadFolder READ defaultCadFolder CONSTANT)
     Q_PROPERTY(double refreshHz READ refreshHz WRITE setRefreshHz NOTIFY refreshHzChanged)
     Q_PROPERTY(QString runState READ runState NOTIFY runStateChanged)
     Q_PROPERTY(bool firmwareConfigurable READ firmwareConfigurable NOTIFY firmwareConfigurableChanged)
@@ -81,6 +84,11 @@ public:
     MacroRunner *macros() const { return m_macros; }
     ConfigStore *config() const { return m_config; }
     Calibration *calibration() const { return m_calib; }
+    CadModel *cad() const { return m_cad; }
+    // bundled model: <app>/models/opengrasp_lite (deployed) or the source tree (dev)
+    QString defaultCadFolder() const;
+    // load the model folder from Visual settings ("" = bundled); false keeps the block hand
+    Q_INVOKABLE bool loadCad(const QString &folder);
     // Visual Refresh Rate: plots and the 3D view
     double refreshHz() const { return m_refreshHz; }
     void setRefreshHz(double hz);
@@ -134,6 +142,7 @@ private:
     MacroRunner *m_macros;
     ConfigStore *m_config;
     Calibration *m_calib;
+    CadModel *m_cad;
     double m_refreshHz = 30;
     bool m_fwConfigurable = false;
     QTimer m_idTimer;

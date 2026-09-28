@@ -2,6 +2,7 @@
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "core/CadModel.h"
 #include "core/Calibration.h"
 #include "core/HandController.h"
 #include "core/HandModel.h"
@@ -297,6 +298,55 @@ private slots:
         // the status-panel limit is the main joint's limit
         hand.setBenchJoint(3);
         QCOMPARE(tel.currentLimitMa(), 500.0);
+    }
+
+    void cadModel()
+    {
+        CadModel cad;
+        QVERIFY2(cad.load(QStringLiteral(CH_SOURCE_DIR) + QStringLiteral("/assets/models/opengrasp_lite")), qPrintable(cad.lastError()));
+        QCOMPARE(cad.joints().size(), 6);
+        QVERIFY(cad.meshCount() > 10);
+        QVERIFY(cad.triangles() > 10000);
+        // rest pose = identity (within float rounding)
+        auto nearId = [](const QMatrix4x4 &m) {
+            const QMatrix4x4 id;
+            for (int k = 0; k < 16; ++k)
+                if (qAbs(m.constData()[k] - id.constData()[k]) > 1e-3f)
+                    return false;
+            return true;
+        };
+        for (const QMatrix4x4 &m : cad.solve({}))
+            QVERIFY(nearId(m));
+        const int links = cad.linkCount();
+        const QStringList ln = cad.links();
+        // index finger at 30 deg: proximal phalanx turns 30 deg, fingertip more (four-bar coupling)
+        const QVector<QMatrix4x4> ms = cad.solve({{QStringLiteral("I"), 30.0}});
+        QCOMPARE(ms.size(), links);
+        auto angleOf = [](const QMatrix4x4 &m) {
+            const double tr = m(0, 0) + m(1, 1) + m(2, 2);
+            return qRadiansToDegrees(std::acos(qBound(-1.0, (tr - 1) / 2, 1.0)));
+        };
+        QVERIFY(qAbs(angleOf(ms[ln.indexOf(QStringLiteral("I_pp"))]) - 30.0) < 0.01);
+        QVERIFY(angleOf(ms[ln.indexOf(QStringLiteral("I_tip"))]) > 40.0);
+        QVERIFY(nearId(ms[ln.indexOf(QStringLiteral("M_pp"))]));
+        // the chain stays closed: C on the tip keeps its distance to D
+        const CadModel::Joint &ji = cad.joints()[0];
+        QCOMPARE(ji.key, QStringLiteral("I"));
+        const QVector3D c1 = ms[ln.indexOf(QStringLiteral("I_tip"))].map(ji.C);
+        QVERIFY(qAbs((c1 - ji.D).length() - (ji.C - ji.D).length()) < 0.05);
+        // thumb: T1 follows T2 (child of the base)
+        const QVector<QMatrix4x4> mt = cad.solve({{QStringLiteral("T2"), 40.0}});
+        QVERIFY(!nearId(mt[ln.indexOf(QStringLiteral("T_pp"))]));
+        // far outside the range: backs off to a reachable pose, no NaN
+        const QVector<QMatrix4x4> mx = cad.solve({{QStringLiteral("T1"), 170.0}, {QStringLiteral("P"), 170.0}});
+        for (const QMatrix4x4 &m : mx)
+            for (int k = 0; k < 16; ++k)
+                QVERIFY(!qIsNaN(m.constData()[k]));
+        // pose object for QML
+        CadPose pose;
+        pose.setModel(&cad);
+        pose.setAngles({0, 0, 45, 0, 0, 0});
+        QCOMPARE(pose.rotations().size(), links);
     }
 
     void llmExtract()

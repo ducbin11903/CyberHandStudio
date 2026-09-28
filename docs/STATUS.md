@@ -23,6 +23,7 @@ Cập nhật: 2026-09-27
 - Calibration: quét 2 chặn cơ khí (H → o +duty tới khi kẹt) hoặc ghi điểm tay, fit tuyến tính + R², Áp dụng → cnt/90° + `j`.
 - Stream Input Processing: Handed, Sampling Rate, Filter Frequency, Averaging, Max Velocity, Max Acceleration.
 - Đèn trạng thái OFFLINE / IDLE / READY / RUN / FAULT, Data Monitor (mọi field + min/max, bảng khớp), Visual Refresh Rate, Power Sample Rate (`a`).
+- Mô hình 3D từ STEP (OpenGrasp-Lite): 33 mesh, ~264k tam giác, động học 4 khâu cho 4 ngón và ngón cái (docs/MODEL3D.md).
 - Firmware H562 fw 0.5: `i`, `j`, `I`, `a`, dòng `OVERI:`; đã thử logic trên máy (stub HAL) và fw_sim.
 
 ## Giả định cần Duc xác nhận

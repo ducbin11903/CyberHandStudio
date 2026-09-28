@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import CyberHand
 import CyberHand.Core
@@ -11,6 +12,16 @@ Card {
     readonly property var bench: hand.joints[hand.benchJoint]
 
     TextPrompt { id: prompt }
+    FolderDialog {
+        id: cadDialog
+        title: qsTr("Thư mục mô hình 3D (rig.json)")
+        onAccepted: {
+            if (Core.loadCad(selectedFolder.toString())) {
+                Core.setUiValue("cadFolder", selectedFolder.toString())
+                Core.setUiValue("model3d", "cad")
+            }
+        }
+    }
     ConfirmDialog { id: confirm }
     MacroEditor { id: macroEditor }
 
@@ -487,6 +498,35 @@ Card {
                         label: qsTr("Lưới sàn")
                         FlatCheck { checked: Core.ui.showFloor !== false; onToggled: Core.setUiValue("showFloor", checked) }
                         Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: qsTr("Mô hình 3D")
+                        FlatCombo {
+                            Layout.fillWidth: true
+                            model: [Core.cad.loaded ? "CAD · " + Core.cad.name : qsTr("CAD (chưa nạp)"), qsTr("Khối đơn giản")]
+                            currentIndex: Core.ui.model3d === "blocks" || !Core.cad.loaded ? 1 : 0
+                            onActivated: (i) => Core.setUiValue("model3d", i === 1 ? "blocks" : "cad")
+                        }
+                    }
+                    FormRow {
+                        label: qsTr("Thư mục model")
+                        FlatButton {
+                            text: qsTr("Mở…")
+                            iconPath: Icons.folder
+                            tip: qsTr("Thư mục có rig.json + hand.bin (tools/cad/step_to_rig.py)")
+                            onClicked: cadDialog.open()
+                        }
+                        FlatButton {
+                            text: qsTr("Mặc định")
+                            enabled: (Core.ui.cadFolder || "").length > 0
+                            onClicked: { Core.setUiValue("cadFolder", ""); Core.loadCad(""); Core.setUiValue("model3d", "cad") }
+                        }
+                        TextLabel {
+                            Layout.fillWidth: true
+                            muted: true
+                            font.pixelSize: Theme.fontTiny
+                            text: Core.cad.loaded ? Math.round(Core.cad.triangles / 1000) + "k tam giác" : Core.cad.lastError
+                        }
                     }
                     FormRow {
                         label: qsTr("Visual Refresh Rate")

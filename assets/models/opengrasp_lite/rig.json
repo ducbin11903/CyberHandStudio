@@ -1,0 +1,432 @@
+{
+ "format": "cyberhand-rig-1",
+ "name": "OpenGrasp-Lite (HAND_Assembly_with_screws)",
+ "units": "mm",
+ "mesh": "hand.bin",
+ "bounds": [
+  [
+   -8.8068,
+   -35.87,
+   -41.6062
+  ],
+  [
+   100.8115,
+   79.1674,
+   221.7107
+  ]
+ ],
+ "view": {
+  "eulerDeg": [
+   -90,
+   0,
+   0
+  ],
+  "position": [
+   -46.0024,
+   -15.3938,
+   21.6487
+  ]
+ },
+ "links": [
+  "palm",
+  "I_pp",
+  "I_tip",
+  "I_cd",
+  "M_pp",
+  "M_tip",
+  "M_cd",
+  "R_pp",
+  "R_tip",
+  "R_cd",
+  "P_pp",
+  "P_tip",
+  "P_cd",
+  "T_base",
+  "T_pp",
+  "T_tip",
+  "T_cd"
+ ],
+ "meshes": [
+  {
+   "link": "palm",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 2268
+  },
+  {
+   "link": "palm",
+   "color": "#C9C9C9",
+   "cls": "palm",
+   "triangles": 38116
+  },
+  {
+   "link": "palm",
+   "color": "#4E6E5A",
+   "cls": "pcb",
+   "triangles": 340
+  },
+  {
+   "link": "I_pp",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 14010
+  },
+  {
+   "link": "I_pp",
+   "color": "#D9D9D9",
+   "cls": "printed",
+   "triangles": 3522
+  },
+  {
+   "link": "I_tip",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 252
+  },
+  {
+   "link": "I_tip",
+   "color": "#E2D8D0",
+   "cls": "tip",
+   "triangles": 4292
+  },
+  {
+   "link": "I_cd",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 16000
+  },
+  {
+   "link": "M_pp",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 14010
+  },
+  {
+   "link": "M_pp",
+   "color": "#D9D9D9",
+   "cls": "printed",
+   "triangles": 3522
+  },
+  {
+   "link": "M_tip",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 252
+  },
+  {
+   "link": "M_tip",
+   "color": "#E2D8D0",
+   "cls": "tip",
+   "triangles": 4292
+  },
+  {
+   "link": "M_cd",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 16000
+  },
+  {
+   "link": "R_pp",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 14010
+  },
+  {
+   "link": "R_pp",
+   "color": "#D9D9D9",
+   "cls": "printed",
+   "triangles": 3522
+  },
+  {
+   "link": "R_tip",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 252
+  },
+  {
+   "link": "R_tip",
+   "color": "#E2D8D0",
+   "cls": "tip",
+   "triangles": 4292
+  },
+  {
+   "link": "R_cd",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 16000
+  },
+  {
+   "link": "P_pp",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 14010
+  },
+  {
+   "link": "P_pp",
+   "color": "#D9D9D9",
+   "cls": "printed",
+   "triangles": 3522
+  },
+  {
+   "link": "P_tip",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 252
+  },
+  {
+   "link": "P_tip",
+   "color": "#E2D8D0",
+   "cls": "tip",
+   "triangles": 4292
+  },
+  {
+   "link": "P_cd",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 16000
+  },
+  {
+   "link": "T_base",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 9148
+  },
+  {
+   "link": "T_base",
+   "color": "#4E6E5A",
+   "cls": "pcb",
+   "triangles": 68
+  },
+  {
+   "link": "T_base",
+   "color": "#D9D9D9",
+   "cls": "printed",
+   "triangles": 2695
+  },
+  {
+   "link": "T_pp",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 11678
+  },
+  {
+   "link": "T_pp",
+   "color": "#A7A9AD",
+   "cls": "motor",
+   "triangles": 26056
+  },
+  {
+   "link": "T_pp",
+   "color": "#4E6E5A",
+   "cls": "pcb",
+   "triangles": 4668
+  },
+  {
+   "link": "T_pp",
+   "color": "#D9D9D9",
+   "cls": "printed",
+   "triangles": 4672
+  },
+  {
+   "link": "T_tip",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 252
+  },
+  {
+   "link": "T_tip",
+   "color": "#E2D8D0",
+   "cls": "tip",
+   "triangles": 2032
+  },
+  {
+   "link": "T_cd",
+   "color": "#8E9297",
+   "cls": "metal",
+   "triangles": 9357
+  }
+ ],
+ "joints": [
+  {
+   "key": "I",
+   "type": "fourbar",
+   "axis": [
+    -0.9925,
+    0.0,
+    -0.1219
+   ],
+   "A": [
+    14.3479,
+    3.63,
+    139.608
+   ],
+   "B": [
+    9.9793,
+    0.3087,
+    175.1873
+   ],
+   "C": [
+    9.0612,
+    6.8856,
+    182.664
+   ],
+   "D": [
+    13.4338,
+    -9.37,
+    147.0521
+   ],
+   "input": "I_pp",
+   "coupler": "I_tip",
+   "follower": "I_cd"
+  },
+  {
+   "key": "M",
+   "type": "fourbar",
+   "axis": [
+    -1.0,
+    0.0,
+    -0.0
+   ],
+   "A": [
+    35.3701,
+    3.63,
+    140.8938
+   ],
+   "B": [
+    35.3701,
+    -0.1801,
+    176.6916
+   ],
+   "C": [
+    35.3701,
+    5.6779,
+    184.7961
+   ],
+   "D": [
+    35.3701,
+    -9.37,
+    148.3938
+   ],
+   "input": "M_pp",
+   "coupler": "M_tip",
+   "follower": "M_cd"
+  },
+  {
+   "key": "R",
+   "type": "fourbar",
+   "axis": [
+    -0.9925,
+    0.0,
+    0.1219
+   ],
+   "A": [
+    56.3924,
+    3.63,
+    139.608
+   ],
+   "B": [
+    60.7591,
+    0.144,
+    175.1717
+   ],
+   "C": [
+    61.7001,
+    6.4986,
+    182.8355
+   ],
+   "D": [
+    57.3064,
+    -9.37,
+    147.0521
+   ],
+   "input": "R_pp",
+   "coupler": "R_tip",
+   "follower": "R_cd"
+  },
+  {
+   "key": "P",
+   "type": "fourbar",
+   "axis": [
+    -0.9659,
+    0.0,
+    0.2588
+   ],
+   "A": [
+    77.2097,
+    3.63,
+    135.5615
+   ],
+   "B": [
+    86.4966,
+    0.7133,
+    170.2205
+   ],
+   "C": [
+    88.3295,
+    7.7734,
+    177.0613
+   ],
+   "D": [
+    79.1508,
+    -9.37,
+    142.806
+   ],
+   "input": "P_pp",
+   "coupler": "P_tip",
+   "follower": "P_cd"
+  },
+  {
+   "key": "T2",
+   "type": "revolute",
+   "axis": [
+    -0.342,
+    0.0,
+    -0.9397
+   ],
+   "point": [
+    10.6767,
+    1.68,
+    86.3034
+   ],
+   "link": "T_base",
+   "children": [
+    "T_pp",
+    "T_tip",
+    "T_cd"
+   ]
+  },
+  {
+   "key": "T1",
+   "type": "fourbar",
+   "parent": "T2",
+   "axis": [
+    0.915,
+    0.2278,
+    -0.333
+   ],
+   "A": [
+    8.7489,
+    16.2857,
+    90.9957
+   ],
+   "B": [
+    1.871,
+    61.8354,
+    103.25
+   ],
+   "C": [
+    4.8521,
+    62.8605,
+    112.1417
+   ],
+   "D": [
+    -4.161,
+    22.1395,
+    85.0527
+   ],
+   "input": "T_pp",
+   "coupler": "T_tip",
+   "follower": "T_cd"
+  }
+ ]
+}

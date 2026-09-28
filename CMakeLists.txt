@@ -23,7 +23,9 @@ file(GLOB CH_CORE_SOURCES CONFIGURE_DEPENDS
 add_library(chcore STATIC ${CH_CORE_SOURCES})
 target_include_directories(chcore PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(chcore PUBLIC
-    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::SerialPort Qt6::Network)
+    Qt6::Core Qt6::Gui Qt6::Qml Qt6::Quick Qt6::Quick3D Qt6::SerialPort Qt6::Network)
+# source tree, for running from the build folder without deploying models/
+target_compile_definitions(chcore PUBLIC CH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(chcore PUBLIC
     CH_VERSION="${PROJECT_VERSION}")
 

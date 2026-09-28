@@ -3,6 +3,7 @@
 #include "LineParser.h"
 #include "PlotItem.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -34,6 +35,7 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_llm = new LlmClient(m_hand, this);
     m_macros = new MacroRunner(m_ctrl, m_console, m_poses, this);
     m_calib = new Calibration(m_hand, m_ctrl, m_telemetry, m_link, m_console, this);
+    m_cad = new CadModel(this);
 
     QString dir = configDir;
     if (dir.isEmpty())
@@ -150,6 +152,7 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_player->setTrajectory(m_textTraj);
 
     m_config->loadLastOrDefault();
+    loadCad(m_ui.value(QStringLiteral("cadFolder")).toString());
     connect(qApp, &QGuiApplication::aboutToQuit, this, [this]() { m_config->save(); });
 }
 
@@ -179,6 +182,9 @@ void AppCore::registerQmlTypes()
     qmlRegisterUncreatableType<MacroRunner>(uri, 1, 0, "MacroRunner", why);
     qmlRegisterUncreatableType<ConfigStore>(uri, 1, 0, "ConfigStore", why);
     qmlRegisterUncreatableType<Calibration>(uri, 1, 0, "Calibration", why);
+    qmlRegisterUncreatableType<CadModel>(uri, 1, 0, "CadModel", why);
+    qmlRegisterType<CadPose>(uri, 1, 0, "CadPose");
+    qmlRegisterType<CadGeometry>(uri, 1, 0, "CadGeometry");
 }
 
 void AppCore::onLine(const QString &line, double t)
@@ -206,6 +212,30 @@ void AppCore::setActiveMode(const QString &m)
         m_player->setTrajectory(m_timelineTraj);
     m_gamepad->setEnabled(m == QLatin1String("controller"));
     emit activeModeChanged();
+}
+
+QString AppCore::defaultCadFolder() const
+{
+    const QStringList candidates = {
+        QCoreApplication::applicationDirPath() + QStringLiteral("/models/opengrasp_lite"),
+        QStringLiteral(CH_SOURCE_DIR) + QStringLiteral("/assets/models/opengrasp_lite"),
+    };
+    for (const QString &c : candidates)
+        if (QFileInfo::exists(c + QStringLiteral("/rig.json")))
+            return c;
+    return candidates.first();
+}
+
+bool AppCore::loadCad(const QString &folder)
+{
+    const QString f = folder.isEmpty() ? defaultCadFolder() : folder;
+    if (m_cad->load(f)) {
+        m_console->info(tr("Mô hình 3D: %1 (%2 tam giác)").arg(m_cad->name()).arg(m_cad->triangles()));
+        return true;
+    }
+    if (!folder.isEmpty())
+        m_console->error(tr("Mô hình 3D: %1").arg(m_cad->lastError()));
+    return false;
 }
 
 void AppCore::setRefreshHz(double hz)

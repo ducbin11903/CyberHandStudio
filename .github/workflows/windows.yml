@@ -69,6 +69,9 @@ jobs:
           mkdir -p dist/examples dist/tools
           cp assets/examples/* dist/examples/
           cp tools/*.py dist/tools/
+          mkdir -p dist/tools/cad dist/models
+          cp tools/cad/*.py dist/tools/cad/
+          cp -r assets/models/* dist/models/
           cp README.md dist/README.md
           cp assets/fonts/OFL.txt dist/FONT-LICENSE-OFL.txt
           ls dist | head -100
