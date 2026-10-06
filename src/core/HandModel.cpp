@@ -76,6 +76,14 @@ void Joint::setCurrentLimitMa(double l)
     emit stateChanged();
 }
 
+void Joint::setOffPort(bool o)
+{
+    if (o == m_offPort)
+        return;
+    m_offPort = o;
+    emit portChanged();
+}
+
 void Joint::setFeedback(double measuredDeg, double targetDeg, double rawCounts)
 {
     const bool had = m_hasFeedback;

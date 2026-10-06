@@ -27,6 +27,8 @@ class Joint : public QObject
     Q_PROPERTY(double rawCounts READ rawCounts NOTIFY stateChanged)
     Q_PROPERTY(double currentLimitMa READ currentLimitMa WRITE setCurrentLimitMa NOTIFY configChanged)
     Q_PROPERTY(bool overLimit READ overLimit NOTIFY stateChanged)
+    // a port is open but this joint's motor is on the other MCU (MCB G474: U6 / U7)
+    Q_PROPERTY(bool offPort READ offPort NOTIFY portChanged)
 
 public:
     Joint(int index, const QString &key, const QString &name, QObject *parent = nullptr);
@@ -62,6 +64,8 @@ public:
     double currentLimitMa() const { return m_limit; }
     void setCurrentLimitMa(double l);
     bool overLimit() const { return m_hasCurrent && qAbs(m_current) > m_limit; }
+    bool offPort() const { return m_offPort; }
+    void setOffPort(bool o);
 
     double countsToDeg(double c) const { return c * 90.0 / m_cnt90; }
     double degToCounts(double d) const { return d * m_cnt90 / 90.0; }
@@ -80,6 +84,7 @@ signals:
     void stateChanged();
     void commandChanged();
     void previewChanged();
+    void portChanged();
 
 private:
     int m_index;
@@ -99,6 +104,7 @@ private:
     double m_raw = 0;
     double m_limit = 300;
     bool m_hasCurrent = false;
+    bool m_offPort = false;
 };
 
 // The 6 joints of CyberHand, ordered as on the board: T2, T1, I, M, R, P.

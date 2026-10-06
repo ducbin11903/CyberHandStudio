@@ -59,6 +59,7 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
             m_fwConfigurable = false;
             emit firmwareConfigurableChanged();
         }
+        m_fwSynced = false;
         if (m_link->connected()) {
             m_live->clear();
             m_console->info(tr("Đã kết nối %1 @ %2").arg(m_link->portName()).arg(m_link->baudRate()));
@@ -76,24 +77,11 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     });
     connect(m_telemetry, &Telemetry::sample, m_live, &LiveSeries::addSample);
     connect(m_telemetry, &Telemetry::overCurrent, this, &AppCore::onOverCurrent);
-    connect(m_telemetry, &Telemetry::configFromFirmware, this, [this](int joints, double cnt90) {
-        m_console->info(tr("Firmware: %1 khớp, %2 count/90°").arg(joints).arg(cnt90));
-        if (cnt90 <= 0)
-            return;
-        m_fwConfigurable = true;
-        emit firmwareConfigurableChanged();
-        Joint *j = m_hand->joint(m_hand->benchJoint());
-        if (!j)
-            return;
-        if (m_calib->syncOnConnect() && m_ctrl->protocol() == HandController::BenchSingle) {
-            // the app profile holds the calibration: push it when the firmware differs
-            if (qAbs(j->countsPer90() - cnt90) >= 1)
-                m_ctrl->sendCountsPer90(j->countsPer90());
-            if (m_telemetry->overSource() == Telemetry::Firmware)
-                pushProtection();
-        } else if (!m_calib->syncOnConnect()) {
-            j->setCountsPer90(cnt90);
-        }
+    connect(m_telemetry, &Telemetry::configFromFirmware, this, &AppCore::onFirmwareId);
+    // G474: the main joint picks the motor of the single-motor commands
+    connect(m_hand, &HandModel::benchJointChanged, this, [this]() {
+        if (m_link->connected() && !m_ctrl->portKeys().isEmpty())
+            m_ctrl->selectBenchMotor();
     });
 
     // stream / gamepad / poses -> hand
@@ -261,6 +249,66 @@ QString AppCore::runState() const
     const bool moving = (m_player->playing() && m_player->output()) || qAbs(m_telemetry->out()) >= 1.0
                         || m_calib->running() || m_macros->running();
     return moving ? QStringLiteral("RUN") : QStringLiteral("READY");
+}
+
+void AppCore::onFirmwareId(int joints, double cnt90)
+{
+    m_console->info(tr("Firmware: %1 khớp, %2 count/90°").arg(joints).arg(cnt90));
+    const bool g474 = m_telemetry->firmwareG474();
+    const QStringList keys = m_telemetry->firmwareKeys();
+    if (g474) {
+        // MCB G474: this port = one MCU with 3 motors
+        m_ctrl->setPortInfo(m_telemetry->firmwareMcu(), keys);
+        m_console->info(tr("Cổng %1: %2").arg(m_telemetry->firmwareMcu().isEmpty() ? tr("MCU") : m_telemetry->firmwareMcu(),
+                                             keys.join(QStringLiteral(", "))));
+        if (m_ctrl->protocol() != HandController::PerJoint) {
+            m_ctrl->setProtocol(HandController::PerJoint);
+            m_console->info(tr("Firmware G474 → giao thức \"Từng khớp\""));
+        }
+        m_ctrl->selectBenchMotor(); // m <main joint>, or "Khớp X nằm ở U7 — cắm cổng U7"
+    }
+    if (cnt90 <= 0)
+        return;
+    if (!m_fwConfigurable) {
+        m_fwConfigurable = true;
+        emit firmwareConfigurableChanged();
+    }
+    if (m_fwSynced) // an `i` typed later does not push everything again
+        return;
+    m_fwSynced = true;
+
+    if (g474) {
+        if (!m_calib->syncOnConnect())
+            return;
+        // the app profile holds the calibration: every motor of this MCU gets its j (and I)
+        static const int fw[] = {3, 0, 1, 2};
+        for (const QString &k : keys) {
+            const Joint *j = m_hand->joint(m_hand->indexOfKey(k));
+            if (!j)
+                continue;
+            m_ctrl->send(QStringLiteral("m ") + k);
+            m_ctrl->send(QStringLiteral("j ") + LineParser::num(j->countsPer90(), 0));
+            if (m_telemetry->overSource() == Telemetry::Firmware)
+                m_ctrl->send(HandController::protectionCommand(j->currentLimitMa(), m_telemetry->tripMs(),
+                                                               fw[qBound(0, m_telemetry->overResponse(), 3)],
+                                                               m_telemetry->retractDeg()));
+        }
+        m_ctrl->selectBenchMotor(false);
+        return;
+    }
+
+    Joint *j = m_hand->joint(m_hand->benchJoint());
+    if (!j)
+        return;
+    if (m_calib->syncOnConnect() && m_ctrl->protocol() == HandController::BenchSingle) {
+        // single-joint bench: push the profile's calibration when the firmware differs
+        if (qAbs(j->countsPer90() - cnt90) >= 1)
+            m_ctrl->sendCountsPer90(j->countsPer90());
+        if (m_telemetry->overSource() == Telemetry::Firmware)
+            pushProtection();
+    } else if (!m_calib->syncOnConnect()) {
+        j->setCountsPer90(cnt90);
+    }
 }
 
 bool AppCore::pushProtection()

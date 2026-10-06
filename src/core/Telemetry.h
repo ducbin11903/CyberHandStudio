@@ -33,6 +33,10 @@ class Telemetry : public QObject
     Q_PROPERTY(double sampleRate READ sampleRate NOTIFY rateChanged)
     Q_PROPERTY(QVariantMap fields READ fields NOTIFY updated)
     Q_PROPERTY(QString firmwareId READ firmwareId NOTIFY firmwareIdChanged)
+    // MCB G474: "mcu=U6 ... keys=I,T1,T2" = this port's MCU and the joints of its motors 1..3
+    Q_PROPERTY(QString firmwareMcu READ firmwareMcu NOTIFY firmwareIdChanged)
+    Q_PROPERTY(QStringList firmwareKeys READ firmwareKeys NOTIFY firmwareIdChanged)
+    Q_PROPERTY(bool firmwareG474 READ firmwareG474 NOTIFY firmwareIdChanged)
     Q_PROPERTY(double peakMa READ peakMa NOTIFY updated)
     Q_PROPERTY(double velCps READ velCps NOTIFY updated)
     Q_PROPERTY(double outputRpm READ outputRpm NOTIFY updated)
@@ -89,6 +93,9 @@ public:
     double sampleRate() const { return m_rate; }
     QVariantMap fields() const { return m_fields; }
     QString firmwareId() const { return m_fwId; }
+    QString firmwareMcu() const { return m_fwMcu; }
+    QStringList firmwareKeys() const { return m_fwKeys; }
+    bool firmwareG474() const { return m_fwG474; }
     double peakMa() const { return m_peak; }
     double currentLimitMa() const;
     void setCurrentLimitMa(double l);
@@ -144,6 +151,9 @@ private:
     double m_rate = 0;
     QVariantMap m_fields;
     QString m_fwId;
+    QString m_fwMcu;
+    QStringList m_fwKeys;
+    bool m_fwG474 = false;
     double m_peak = 0;
     int m_response = Warn;
     int m_source = App;

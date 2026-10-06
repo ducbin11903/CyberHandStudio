@@ -70,8 +70,10 @@ ToolWindow {
         }
         TextLabel {
             Layout.fillWidth: true
-            visible: Core.ctrl.protocol === 0
-            text: qsTr("Giao thức Bench 1 khớp: chỉ %1 được gửi tới tay, các khớp khác chỉ cập nhật mô phỏng.").arg(Core.hand.joints[Core.hand.benchJoint].name)
+            visible: Core.ctrl.protocol === 0 || Core.ctrl.portKeys.length > 0
+            text: Core.ctrl.portKeys.length > 0
+                  ? qsTr("Cổng %1: chỉ gửi %2; khớp mờ nằm ở MCU kia, chỉ cập nhật mô phỏng.").arg(Core.ctrl.portMcu).arg(Core.ctrl.portKeys.join(", "))
+                  : qsTr("Giao thức Bench 1 khớp: chỉ %1 được gửi tới tay, các khớp khác chỉ cập nhật mô phỏng.").arg(Core.hand.joints[Core.hand.benchJoint].name)
             muted: true
             font.pixelSize: Theme.fontSmall
         }
@@ -86,7 +88,7 @@ ToolWindow {
                 Rectangle {
                     id: col
                     readonly property var j: modelData
-                    readonly property bool sent: Core.ctrl.protocol !== 0 || index === Core.hand.benchJoint
+                    readonly property bool sent: !j.offPort && (Core.ctrl.protocol !== 0 || index === Core.hand.benchJoint)
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     radius: Theme.radiusSmall
@@ -98,6 +100,7 @@ ToolWindow {
                         anchors.fill: parent
                         anchors.margins: 6
                         spacing: 4
+                        opacity: col.j.offPort ? 0.5 : 1.0
                         RowLayout {
                             Layout.alignment: Qt.AlignHCenter
                             spacing: 4
@@ -107,9 +110,17 @@ ToolWindow {
                         TextLabel {
                             Layout.fillWidth: true
                             horizontalAlignment: Text.AlignHCenter
-                            text: col.j.name
-                            secondary: true
+                            text: col.j.offPort ? qsTr("chưa kết nối") : col.j.name
+                            color: col.j.offPort ? Theme.warnAmber : Theme.textSecondary
                             font.pixelSize: Theme.fontTiny
+                        }
+                        // G474: one motor of the MCU on / off (e <key> / d <key>)
+                        RowLayout {
+                            Layout.alignment: Qt.AlignHCenter
+                            visible: Core.ctrl.portKeys.length > 0 && !col.j.offPort
+                            spacing: 2
+                            FlatButton { text: "E"; tip: "e " + col.j.key; onClicked: Core.ctrl.enableJoint(index) }
+                            FlatButton { text: "D"; danger: true; tip: "d " + col.j.key; onClicked: Core.ctrl.disableJoint(index) }
                         }
                         NumberField {
                             Layout.fillWidth: true

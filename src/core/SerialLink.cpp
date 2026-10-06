@@ -104,6 +104,11 @@ bool SerialLink::open()
 
 void SerialLink::close()
 {
+    if (m_virtual) {
+        m_virtual = false;
+        emit connectedChanged();
+        return;
+    }
     if (!m_port.isOpen())
         return;
     m_port.close();
@@ -121,8 +126,29 @@ bool SerialLink::toggle()
     return open();
 }
 
+void SerialLink::openVirtual()
+{
+    if (connected())
+        return;
+    m_virtual = true;
+    m_virtualSent.clear();
+    m_clock.start();
+    emit connectedChanged();
+}
+
+void SerialLink::injectLine(const QString &line)
+{
+    m_lastLine.start();
+    emit lineReceived(line, elapsed());
+}
+
 bool SerialLink::sendLine(const QString &text, bool quiet)
 {
+    if (m_virtual) {
+        m_virtualSent << text;
+        emit lineSent(text, quiet);
+        return true;
+    }
     if (!m_port.isOpen())
         return false;
     QByteArray data = text.toUtf8();

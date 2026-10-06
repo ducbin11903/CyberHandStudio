@@ -9,6 +9,10 @@ Windows:      install com0com (virtual COM pair, e.g. COM20<->COM21), then
               python fw_sim.py --port COM21  -> open COM20 in the app (needs pyserial)
 
 Options: --joints 6 to emulate the proposed 6-joint log (q1..q6, t1..t6, i1..i6).
+         --g474 U6|U7 to emulate one MCU of the MCB board (fw 0.7-g474): 3 motors,
+         U6 = I, T1, T2 and U7 = M, R, P (motor 1/2/3), commands m / e d c [key] / D,
+         g <joint 1-6|key> <deg> (joints of the other MCU are ignored without a reply),
+         log = 10 channels of the selected motor + qN/tN/iN for the 3 joints.
 """
 import argparse
 import math
@@ -347,6 +351,187 @@ class Firmware:
             self.write("%s,%s,%s,en:%d,flt:%d,mode:%d" % (q, t, c, self.en, self.flt, self.mode))
 
 
+# ---------------------------------------------------------------------------
+# MCB G474: one MCU, 3 motors (fw 0.7-g474)
+
+G474_KEYS = {"U6": ["I", "T1", "T2"], "U7": ["M", "R", "P"]}
+APP_ORDER = ["T2", "T1", "I", "M", "R", "P"]   # joint numbers 1..6 used by g <j> and qN/tN/iN
+
+
+class G474:
+    def __init__(self, mcu, write):
+        self.write = write
+        self.mcu = mcu
+        self.keys = G474_KEYS[mcu]
+        self.sel = 0
+        self.log_hz = 5.0
+        self.last_log = 0.0
+        self.buf = b""
+        self._mute = True
+        self.ch = []
+        for _ in self.keys:
+            fw = Firmware(1, self._chan_write)
+            fw.log_hz = 0
+            self.ch.append(fw)
+        self._mute = False
+        self.write("USBX: OK")
+        self.write(self.id_line())
+
+    @property
+    def no_vm(self):
+        return self.ch[0].no_vm
+
+    @no_vm.setter
+    def no_vm(self, v):
+        for c in self.ch:
+            c.no_vm = v
+
+    def _chan_write(self, s):
+        if not self._mute:
+            self.write(s)
+
+    def id_line(self):
+        return "ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=%d mcu=%s motor=%d(%s) keys=%s" % (
+            self.ch[self.sel].cnt90, self.mcu, self.sel + 1, self.keys[self.sel], ",".join(self.keys))
+
+    def ok(self, msg):
+        self.write("OK " + msg)
+
+    def err(self, msg):
+        self.write("ERR " + msg)
+
+    def feed(self, data):
+        self.buf += data
+        while True:
+            idx = min([i for i in (self.buf.find(b"\n"), self.buf.find(b"\r")) if i >= 0], default=-1)
+            if idx < 0:
+                break
+            line = self.buf[:idx].decode(errors="replace").strip()
+            self.buf = self.buf[idx + 1:]
+            if line:
+                self.command(line)
+
+    def motor_of(self, tok):
+        """motor index on this MCU from a key or 1..3, else None"""
+        for k, key in enumerate(self.keys):
+            if tok.upper() == key:
+                return k
+        if tok.isdigit() and 1 <= int(tok) <= 3:
+            return int(tok) - 1
+        return None
+
+    def joint_of(self, tok):
+        """g <j|key>: (motor index or None, known joint)"""
+        key = None
+        if tok.isdigit() and 1 <= int(tok) <= 6:
+            key = APP_ORDER[int(tok) - 1]
+        elif tok.upper() in APP_ORDER:
+            key = tok.upper()
+        if key is None:
+            return None, False
+        return (self.keys.index(key) if key in self.keys else None), True
+
+    def goto(self, k, deg):
+        c = self.ch[k]
+        self._mute = True
+        c.command("g %s" % deg)
+        self._mute = False
+        self.ok("pos %d cnt %s" % (c.motors[0].tgt, self.keys[k]))
+
+    def command(self, line):
+        parts = line.split()
+        c, args = parts[0], parts[1:]
+        if c == "i":
+            self.write(self.id_line())
+        elif c == "h":
+            for l in HELP_G474.strip("\n").split("\n"):
+                self.write(l)
+        elif c == "l":
+            try:
+                v = float(args[0])
+            except (IndexError, ValueError):
+                return self.err("l <0..100>")
+            self.log_hz = max(0.0, min(100.0, v))
+            self.ok("log %d Hz" % self.log_hz)
+        elif c == "m":
+            if not args:
+                return self.ok("m %d %s" % (self.sel + 1, self.keys[self.sel]))
+            k = self.motor_of(args[0])
+            if k is None:
+                return self.err("m %s: not on %s (keys=%s)" % (args[0], self.mcu, ",".join(self.keys)))
+            self.sel = k
+            self.ok("m %d %s" % (k + 1, self.keys[k]))
+        elif c == "g" and len(args) >= 2:
+            k, known = self.joint_of(args[0])
+            if not known:
+                return self.err("g <joint 1-6|key> <deg>")
+            if k is None:
+                return  # joint of the other MCU: ignored, no reply
+            self.goto(k, args[1])
+        elif c == "g":
+            if not args:
+                return self.err("g <deg>")
+            self.goto(self.sel, args[0])
+        elif c in ("e", "d", "c"):
+            targets = range(3)
+            if args:
+                k = self.motor_of(args[0])
+                if k is None:
+                    return self.err("%s %s: not on %s" % (c, args[0], self.mcu))
+                targets = [k]
+            self._mute = True
+            for k in targets:
+                self.ch[k].command(c)
+            self._mute = False
+            self.ok("%s %s" % (c, self.keys[targets[0]] if args else "all"))
+        elif c == "D":
+            self._mute = True
+            for ch in self.ch:
+                ch.command("d")
+            self._mute = False
+            self.ok("D all off")
+        elif c == "s":
+            self.log_line()
+        elif c == "G":
+            self.err("G not supported, use g <joint> <deg>")
+        elif c in ("o", "+", "-", "r", "0", "p", "t", "v", "k", "x", "H", "z", "j", "I", "a"):
+            self.ch[self.sel].command(line)
+        else:
+            self.err("unknown command '%s' (h for help)" % c)
+
+    def step(self, dt):
+        for ch in self.ch:
+            ch.step(dt)
+        now = time.time()
+        if self.log_hz > 0 and now - self.last_log >= 1.0 / self.log_hz:
+            self.last_log = now
+            self.log_line()
+
+    def log_line(self):
+        c = self.ch[self.sel]
+        m = c.motors[0]
+        diag = 1 if (c.en and not c.no_vm) else 0
+        head = "en:%d,duty:%d,out:%.1f,i_mA:%d,flt:%d,diag:%d,pos:%d,tgt:%d,vel:%d,mode:%d" % (
+            c.en, c.duty, m.out, m.i_rep, c.flt, diag, m.pos, m.tgt if c.mode == 1 else 0, m.speed, c.mode)
+        tail = []
+        for key, ch in zip(self.keys, self.ch):
+            n = APP_ORDER.index(key) + 1
+            mm = ch.motors[0]
+            tail.append("q%d:%d,t%d:%d,i%d:%d" % (n, mm.pos, n, mm.tgt if ch.mode == 1 else mm.pos, n, mm.i_rep))
+        self.write(head + "," + ",".join(tail))
+
+
+HELP_G474 = """
+CyberHand G474 sim (fw 0.7-g474) — this MCU drives 3 joints, see keys= in the ID line
+  m <key|1..3>   select the motor for o + - r 0 p t v k x H z j I a s
+  g <j> <deg>    joint 1-6 (T2 T1 I M R P) or key; joints of the other MCU are ignored
+  g <deg>        selected motor
+  e / d / c [key]   enable / disable / clear faults: all 3 motors, or one
+  D              all motors off
+  i  s  l <hz>  h   id line, status line, log rate, this help
+"""
+
+
 HELP = """
 CyberHand H562 sim — commands (end with CR or LF):
   e / d          enable driver / disable driver
@@ -373,6 +558,7 @@ def main():
     ap.add_argument("--joints", type=int, default=1, choices=[1, 6])
     ap.add_argument("--link", help="also create a symlink to the pty at this path")
     ap.add_argument("--no-vm", action="store_true", help="simulate missing motor supply: no motion, no current, DIAG low")
+    ap.add_argument("--g474", choices=["U6", "U7"], help="emulate one MCU of the MCB G474 board (3 motors)")
     a = ap.parse_args()
 
     if a.port:
@@ -408,7 +594,8 @@ def main():
             except OSError:
                 pass
 
-    fw = Firmware(a.joints, lambda s: write_raw((s + "\r\n").encode()))
+    writer = lambda s: write_raw((s + "\r\n").encode())
+    fw = G474(a.g474, writer) if a.g474 else Firmware(a.joints, writer)
     fw.no_vm = a.no_vm
     last = time.time()
     while True:

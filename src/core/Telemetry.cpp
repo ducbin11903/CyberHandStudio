@@ -128,6 +128,13 @@ void Telemetry::reset()
     m_noMotion = false;
     m_fields.clear();
     m_homed = -1;
+    if (!m_fwId.isEmpty() || !m_fwKeys.isEmpty()) {
+        m_fwId.clear();
+        m_fwMcu.clear();
+        m_fwKeys.clear();
+        m_fwG474 = false;
+        emit firmwareIdChanged();
+    }
     m_peak = 0;
     m_overLimit = false;
     m_overMask = 0;
@@ -289,6 +296,20 @@ void Telemetry::processText(const QString &line)
         noteEvent(code, s);
     } else if (s.startsWith(QLatin1String("ID:"), Qt::CaseInsensitive)) {
         m_fwId = s.mid(3).trimmed();
+        static const QRegularExpression reMcu(QStringLiteral("\\bmcu\\s*=\\s*(\\S+)"));
+        static const QRegularExpression reKeys(QStringLiteral("\\bkeys\\s*=\\s*([A-Za-z0-9_,]+)"));
+        const auto mm = reMcu.match(s);
+        const auto mk = reKeys.match(s);
+        m_fwMcu = mm.hasMatch() ? mm.captured(1) : QString();
+        m_fwKeys.clear();
+        if (mk.hasMatch()) {
+            for (const QString &k : mk.captured(1).split(QLatin1Char(','), Qt::SkipEmptyParts)) {
+                // keep the app's spelling of the key (T2, I, ...)
+                const int idx = m_hand->indexOfKey(k.trimmed());
+                m_fwKeys << (idx >= 0 ? m_hand->joint(idx)->key() : k.trimmed());
+            }
+        }
+        m_fwG474 = s.contains(QLatin1String("CyberHand-G474"), Qt::CaseInsensitive) || !m_fwKeys.isEmpty();
         emit firmwareIdChanged();
         static const QRegularExpression reJ(QStringLiteral("joints\\s*=\\s*(\\d+)"));
         static const QRegularExpression reC(QStringLiteral("cnt90\\s*=\\s*([0-9.]+)"));

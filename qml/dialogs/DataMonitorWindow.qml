@@ -169,11 +169,12 @@ ToolWindow {
                         RowLayout {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 24
+                            opacity: modelData.offPort ? 0.45 : 1.0
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 5
                                 Rectangle { width: 7; height: 7; radius: 3.5; color: Theme.jointColor(index) }
-                                TextLabel { Layout.fillWidth: true; text: modelData.key; font.pixelSize: Theme.fontSmall }
+                                TextLabel { Layout.fillWidth: true; text: modelData.key + (modelData.offPort ? qsTr("  chưa kết nối") : ""); font.pixelSize: Theme.fontSmall }
                             }
                             V { text: modelData.commandDeg.toFixed(1) }
                             V { text: modelData.hasFeedback ? modelData.measuredDeg.toFixed(1) : "—"; color: Theme.infoBlue }

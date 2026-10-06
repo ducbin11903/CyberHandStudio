@@ -52,12 +52,12 @@ ToolWindow {
                             Layout.fillWidth: true
                             spacing: 0
                             TextLabel { Layout.fillWidth: true; text: (index + 1) + " · " + modelData.name }
-                            TextLabel { Layout.fillWidth: true; text: Math.round(modelData.countsPer90) + qsTr(" cnt/90°"); muted: true; font.pixelSize: Theme.fontTiny }
+                            TextLabel { Layout.fillWidth: true; text: Math.round(modelData.countsPer90) + qsTr(" cnt/90°") + (modelData.offPort ? qsTr(" · chưa kết nối") : ""); muted: true; font.pixelSize: Theme.fontTiny }
                         }
                         FlatButton {
                             text: win.cal.running && win.cal.joint === index ? qsTr("Stop") : qsTr("Start")
                             accent: !(win.cal.running && win.cal.joint === index)
-                            enabled: !win.cal.running || win.cal.joint === index
+                            enabled: (!win.cal.running || win.cal.joint === index) && !modelData.offPort
                             tip: qsTr("Home về chặn duỗi rồi gập tới chặn gập, đo hành trình")
                             onClicked: {
                                 if (win.cal.running) { win.cal.stopSweep(); return }

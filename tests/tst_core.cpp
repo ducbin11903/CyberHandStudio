@@ -1,7 +1,9 @@
 #include <QSignalSpy>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QtTest>
 
+#include "core/AppCore.h"
 #include "core/CadModel.h"
 #include "core/Calibration.h"
 #include "core/HandController.h"
@@ -17,6 +19,12 @@ class TstCore : public QObject
 {
     Q_OBJECT
 private slots:
+    void initTestCase()
+    {
+        // AppCore writes examples / settings: keep them out of the real user folders
+        QStandardPaths::setTestModeEnabled(true);
+    }
+
     void parseBenchLog()
     {
         const ParsedLine p = LineParser::parse(QStringLiteral("en:1,duty:0,out:42.0,i_mA:150,flt:0,diag:1,pos:700,tgt:729,vel:350,mode:1"));
@@ -347,6 +355,96 @@ private slots:
         pose.setModel(&cad);
         pose.setAngles({0, 0, 45, 0, 0, 0});
         QCOMPARE(pose.rotations().size(), links);
+    }
+
+    void g474IdKeys()
+    {
+        HandModel hand;
+        Telemetry tel(&hand);
+        QSignalSpy spy(&tel, &Telemetry::configFromFirmware);
+        tel.processText(QStringLiteral("ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2"));
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.first().at(0).toInt(), 3);
+        QCOMPARE(spy.first().at(1).toDouble(), 7000.0);
+        QVERIFY(tel.firmwareG474());
+        QCOMPARE(tel.firmwareMcu(), QStringLiteral("U6"));
+        QCOMPARE(tel.firmwareKeys(), (QStringList{QStringLiteral("I"), QStringLiteral("T1"), QStringLiteral("T2")}));
+        tel.processText(QStringLiteral("ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U7 motor=2(R) keys=m,r,p"));
+        QCOMPARE(tel.firmwareKeys(), (QStringList{QStringLiteral("M"), QStringLiteral("R"), QStringLiteral("P")}));
+        // H562 bench: no keys, not G474
+        tel.processText(QStringLiteral("ID: CyberHand-H562 fw 0.5 joints=1 cnt90=7000"));
+        QVERIFY(!tel.firmwareG474());
+        QVERIFY(tel.firmwareKeys().isEmpty());
+    }
+
+    void g474PortSync()
+    {
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        SerialLink *link = core.link();
+        HandModel *hand = core.hand();
+        HandController *ctrl = core.ctrl();
+        hand->setBenchJoint(hand->indexOfKey(QStringLiteral("I")));
+        link->openVirtual();
+        const QString id = QStringLiteral("ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2");
+        link->injectLine(id);
+        // ID -> m <main joint> -> j for every motor of the MCU -> back to the main joint
+        QCOMPARE(link->virtualSent(), (QStringList{
+            QStringLiteral("m I"),
+            QStringLiteral("m I"), QStringLiteral("j 7000"),
+            QStringLiteral("m T1"), QStringLiteral("j 7000"),
+            QStringLiteral("m T2"), QStringLiteral("j 7000"),
+            QStringLiteral("m I")}));
+        QCOMPARE(ctrl->protocol(), int(HandController::PerJoint));
+        QCOMPARE(ctrl->portMcu(), QStringLiteral("U6"));
+        QCOMPARE(ctrl->selectedKey(), QStringLiteral("I"));
+        QVERIFY(!hand->joint(hand->indexOfKey(QStringLiteral("I")))->offPort());
+        QVERIFY(hand->joint(hand->indexOfKey(QStringLiteral("M")))->offPort());
+
+        // main joint on the other MCU: no m, single-motor commands refused
+        link->clearVirtualSent();
+        hand->setBenchJoint(hand->indexOfKey(QStringLiteral("M")));
+        QVERIFY(link->virtualSent().isEmpty());
+        QVERIFY(!ctrl->benchOnPort());
+        QVERIFY(ctrl->benchHint().contains(QStringLiteral("U7")));
+        QVERIFY(!ctrl->home());
+        QVERIFY(!ctrl->setDuty(30));
+        QVERIFY(!ctrl->applyPid());
+        QVERIFY(ctrl->enable()); // e = whole MCU, still allowed
+        QCOMPARE(link->virtualSent(), QStringList{QStringLiteral("e")});
+
+        link->clearVirtualSent();
+        hand->setBenchJoint(hand->indexOfKey(QStringLiteral("T1")));
+        QCOMPARE(link->virtualSent(), QStringList{QStringLiteral("m T1")});
+        QVERIFY(ctrl->benchOnPort());
+
+        // streaming: only the joints of this port, numbered like the app (1 T2 .. 6 P)
+        link->clearVirtualSent();
+        ctrl->sendJoints({10, 20, 30, 40, 50, 60}, true, true);
+        QCOMPARE(link->virtualSent(), (QStringList{QStringLiteral("g 1 10"), QStringLiteral("g 2 20"), QStringLiteral("g 3 30")}));
+        link->clearVirtualSent();
+        QVERIFY(!ctrl->moveJoint(hand->indexOfKey(QStringLiteral("R")), 45));
+        QVERIFY(link->virtualSent().isEmpty());
+
+        // one motor on / off
+        QVERIFY(ctrl->enableJoint(hand->indexOfKey(QStringLiteral("T2"))));
+        QVERIFY(!ctrl->disableJoint(hand->indexOfKey(QStringLiteral("P"))));
+        QCOMPARE(link->virtualSent(), QStringList{QStringLiteral("e T2")});
+
+        // an `i` typed later: m again, no second calibration push
+        link->clearVirtualSent();
+        link->injectLine(id);
+        QCOMPARE(link->virtualSent(), QStringList{QStringLiteral("m T1")});
+
+        // calibration of a joint that is not the main joint: m <key>, j, back to the main joint
+        link->clearVirtualSent();
+        QVERIFY(ctrl->sendJointCountsPer90(hand->indexOfKey(QStringLiteral("I")), 7500));
+        QCOMPARE(link->virtualSent(), (QStringList{QStringLiteral("m I"), QStringLiteral("j 7500"), QStringLiteral("m T1")}));
+
+        // disconnect clears the port layout
+        link->close();
+        QVERIFY(ctrl->portKeys().isEmpty());
+        QVERIFY(!hand->joint(hand->indexOfKey(QStringLiteral("M")))->offPort());
     }
 
     void llmExtract()

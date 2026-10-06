@@ -39,7 +39,7 @@ public:
     void setBaudRate(int b);
     int lineEnding() const { return m_lineEnding; }
     void setLineEnding(int e);
-    bool connected() const { return m_port.isOpen(); }
+    bool connected() const { return m_port.isOpen() || m_virtual; }
     QString errorString() const { return m_error; }
     double rxBytesPerSec() const { return m_rxRate; }
     double txBytesPerSec() const { return m_txRate; }
@@ -57,6 +57,13 @@ public:
     Q_INVOKABLE bool toggle();
     // Sends text + line ending. Returns false if not connected.
     Q_INVOKABLE bool sendLine(const QString &text, bool quiet = false);
+
+    // Port without hardware (unit tests): sent lines are kept in virtualSent(),
+    // injectLine() delivers a line as if the firmware had sent it.
+    void openVirtual();
+    void injectLine(const QString &line);
+    QStringList virtualSent() const { return m_virtualSent; }
+    void clearVirtualSent() { m_virtualSent.clear(); }
 
 signals:
     void portsChanged();
@@ -91,4 +98,6 @@ private:
     qint64 m_totalRx = 0, m_totalTx = 0;
     double m_rxRate = 0, m_txRate = 0, m_lineRate = 0;
     bool m_lastWasCR = false;
+    bool m_virtual = false;
+    QStringList m_virtualSent;
 };

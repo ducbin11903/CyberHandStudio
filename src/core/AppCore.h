@@ -122,6 +122,8 @@ private:
     void apply(const QJsonObject &o);
     void installExamples();
     void onOverCurrent(int joint, double ma);
+    // ID line: G474 port layout (m <main joint>, protocol), then j / I sync once per connection
+    void onFirmwareId(int joints, double cnt90);
 
     SerialLink *m_link;
     ConsoleModel *m_console;
@@ -145,6 +147,7 @@ private:
     CadModel *m_cad;
     double m_refreshHz = 30;
     bool m_fwConfigurable = false;
+    bool m_fwSynced = false;
     QTimer m_idTimer;
     QString m_mode = QStringLiteral("text");
     QVariantMap m_ui;

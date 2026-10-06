@@ -142,11 +142,29 @@ Card {
                     FormRow {
                         label: qsTr("Khớp chính")
                         FlatCombo {
+                            id: benchCombo
                             Layout.fillWidth: true
-                            model: root.hand.names
+                            // G474: joints of the other MCU are marked
+                            model: root.hand.names.map(function(n, i) {
+                                return root.hand.joints[i].offPort ? n + qsTr("  — chưa kết nối") : n
+                            })
                             currentIndex: root.hand.benchJoint
+                            // a new model resets the index: bind it to the main joint again
+                            onModelChanged: Qt.callLater(function() {
+                                benchCombo.currentIndex = Qt.binding(function() { return root.hand.benchJoint })
+                            })
                             onActivated: (i) => root.hand.benchJoint = i
                         }
+                    }
+                    TextLabel {
+                        Layout.fillWidth: true
+                        visible: Core.ctrl.portKeys.length > 0
+                        font.pixelSize: Theme.fontSmall
+                        secondary: true
+                        text: qsTr("Cổng %1 · khớp %2 · motor đang chọn: %3")
+                              .arg(Core.ctrl.portMcu.length ? Core.ctrl.portMcu : "MCU")
+                              .arg(Core.ctrl.portKeys.join(", "))
+                              .arg(Core.ctrl.selectedKey.length ? Core.ctrl.selectedKey : "—")
                     }
                     RowLayout {
                         Layout.fillWidth: true
@@ -189,7 +207,7 @@ Card {
                             value: Core.ctrl.dutyLimit; decimals: 0; from: 0; to: 100; unit: "%"
                             onCommitted: (v) => Core.ctrl.dutyLimit = v
                         }
-                        FlatButton { text: qsTr("Update"); tip: qsTr("Gửi  x <pct>"); onClicked: Core.ctrl.applyDutyLimit() }
+                        FlatButton { text: qsTr("Update"); tip: qsTr("Gửi  x <pct>"); enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.applyDutyLimit() }
                         Item { Layout.fillWidth: true }
                     }
                     FormRow {
@@ -219,7 +237,7 @@ Card {
                             value: Core.ctrl.powerRate; decimals: 0; from: 1; to: 1000; unit: "Hz"
                             onCommitted: (v) => Core.ctrl.powerRate = v
                         }
-                        FlatButton { text: qsTr("Update"); tip: qsTr("Gửi  a <hz>: firmware lấy trung bình dòng trong 1/hz giây"); onClicked: Core.ctrl.applyPowerRate() }
+                        FlatButton { text: qsTr("Update"); tip: qsTr("Gửi  a <hz>: firmware lấy trung bình dòng trong 1/hz giây"); enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.applyPowerRate() }
                         Item { Layout.fillWidth: true }
                     }
                 }
@@ -268,6 +286,7 @@ Card {
                         }
                         FlatButton {
                             text: qsTr("Ghi FW")
+                            enabled: Core.ctrl.benchOnPort
                             tip: qsTr("Gửi  I <mA> <ms> <kiểu> <độ>  (firmware ≥ 0.5)")
                             onClicked: Core.pushProtection()
                         }
@@ -288,19 +307,30 @@ Card {
                 // ---- Motor (bench) ----------------------------------------
                 Section {
                     title: qsTr("Motor")
+                    TextLabel {
+                        Layout.fillWidth: true
+                        visible: Core.ctrl.benchHint.length > 0
+                        text: Core.ctrl.benchHint + qsTr(" · các lệnh 1 khớp bị khóa")
+                        color: Theme.liveRed
+                        font.pixelSize: Theme.fontSmall
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                    }
                     GridLayout {
                         Layout.fillWidth: true
                         columns: 3
                         columnSpacing: 4
                         rowSpacing: 4
-                        FlatButton { Layout.fillWidth: true; text: qsTr("Enable"); iconPath: Icons.power; tip: "e"; onClicked: Core.ctrl.enable() }
-                        FlatButton { Layout.fillWidth: true; text: qsTr("Disable"); danger: true; tip: "d"; onClicked: Core.ctrl.disable() }
-                        FlatButton { Layout.fillWidth: true; text: qsTr("Home"); iconPath: Icons.home; tip: "H [pct] [mA]"; onClicked: Core.ctrl.home() }
-                        FlatButton { Layout.fillWidth: true; text: qsTr("Zero"); tip: "z"; onClicked: Core.ctrl.zero() }
-                        FlatButton { Layout.fillWidth: true; text: qsTr("Clear fault"); tip: "c"; onClicked: Core.ctrl.clearFault() }
-                        FlatButton { Layout.fillWidth: true; text: qsTr("Status"); tip: "s"; onClicked: Core.ctrl.status() }
+                        readonly property string allTip: Core.ctrl.portKeys.length ? qsTr(" (cả %1)").arg(Core.ctrl.portKeys.join(", ")) : ""
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Enable"); iconPath: Icons.power; tip: "e" + parent.allTip; onClicked: Core.ctrl.enable() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Disable"); danger: true; tip: "d" + parent.allTip; onClicked: Core.ctrl.disable() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Home"); iconPath: Icons.home; tip: "H [pct] [mA]"; enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.home() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Zero"); tip: "z"; enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.zero() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Clear fault"); tip: "c" + parent.allTip; onClicked: Core.ctrl.clearFault() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Status"); tip: "s"; enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.status() }
                     }
                     FormRow {
+                        enabled: Core.ctrl.benchOnPort
                         label: qsTr("Home duty / dòng")
                         NumberField {
                             Layout.preferredWidth: 70
@@ -346,6 +376,7 @@ Card {
                     }
                     // open loop duty
                     FormRow {
+                        enabled: Core.ctrl.benchOnPort
                         label: qsTr("Duty vòng hở")
                         FlatSlider {
                             id: dutySlider
@@ -361,6 +392,7 @@ Card {
                         Layout.fillWidth: true
                         Layout.leftMargin: Theme.labelWidth + 6
                         spacing: 4
+                        enabled: Core.ctrl.benchOnPort
                         FlatButton { text: "−5"; tip: "-"; onClicked: Core.ctrl.dutyDown() }
                         FlatButton { text: "0"; tip: "0"; onClicked: Core.ctrl.stopOpenLoop() }
                         FlatButton { text: "+5"; tip: "+"; onClicked: Core.ctrl.dutyUp() }
@@ -368,6 +400,7 @@ Card {
                         Item { Layout.fillWidth: true }
                     }
                     FormRow {
+                        enabled: Core.ctrl.benchOnPort
                         label: qsTr("Tốc độ khớp")
                         NumberField {
                             id: velField
@@ -380,6 +413,7 @@ Card {
                         Item { Layout.fillWidth: true }
                     }
                     FormRow {
+                        enabled: Core.ctrl.benchOnPort
                         label: qsTr("PID kp / ki / kd")
                         NumberField { Layout.fillWidth: true; value: Core.ctrl.kp; decimals: 6; from: 0; to: 100; onCommitted: (v) => Core.ctrl.kp = v }
                         NumberField { Layout.fillWidth: true; value: Core.ctrl.ki; decimals: 6; from: 0; to: 100; onCommitted: (v) => Core.ctrl.ki = v }
@@ -388,7 +422,7 @@ Card {
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.leftMargin: Theme.labelWidth + 6
-                        FlatButton { text: qsTr("Apply PID"); tip: "k kp ki kd"; onClicked: Core.ctrl.applyPid() }
+                        FlatButton { text: qsTr("Apply PID"); tip: "k kp ki kd"; enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.applyPid() }
                         Item { Layout.fillWidth: true }
                         FlatButton { text: qsTr("Help"); tip: "h"; onClicked: Core.ctrl.help() }
                     }

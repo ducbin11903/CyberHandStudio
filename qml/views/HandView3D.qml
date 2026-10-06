@@ -179,6 +179,7 @@ Card {
             model: root.joints
             Row {
                 spacing: 6
+                opacity: modelData.offPort ? 0.45 : 1.0
                 Rectangle { width: 7; height: 7; radius: 3.5; color: Theme.jointColor(index); anchors.verticalCenter: parent.verticalCenter }
                 TextLabel { text: modelData.key; width: 18; font.pixelSize: Theme.fontSmall; secondary: true }
                 TextLabel {
@@ -187,6 +188,13 @@ Card {
                     horizontalAlignment: Text.AlignRight
                     font.pixelSize: Theme.fontSmall
                     color: modelData.hasFeedback ? Theme.textStrong : Theme.textSecondary
+                }
+                TextLabel {
+                    visible: modelData.offPort
+                    text: qsTr("chưa kết nối")
+                    muted: true
+                    font.pixelSize: Theme.fontTiny
+                    anchors.verticalCenter: parent.verticalCenter
                 }
             }
         }

@@ -26,6 +26,42 @@ Dòng chữ (help, `OK`, `ERR`, `HOME:`, `ID:`) không bắt đầu bằng số.
 `OVERI: retract i=412 mA to 5200 cnt` (trip / retract / hold / warn): firmware đã phản ứng quá dòng → Status hiện RETR / HOLD / TRIP / WARN trong 3 s.
 Bảo vệ luôn dùng dòng 1 ms; `a` chỉ làm mượt số trong log.
 
+## Firmware MCB G474 (fw 0.7)
+
+Mỗi MCU điều khiển 3 khớp và có 1 cổng USB CDC riêng:
+
+| MCU | motor 1 | motor 2 | motor 3 |
+|---|---|---|---|
+| U6 | I | T1 | T2 |
+| U7 | M | R | P |
+
+ID (lệnh `i`, firmware tự in khi mở cổng):
+`ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2`
+(`keys` = khớp của motor 1..3 trên MCU này).
+
+| Lệnh | Tác dụng |
+|---|---|
+| `g <khớp 1-6\|tên> <độ>` | Số khớp toàn tay theo thứ tự app: 1 T2, 2 T1, 3 I, 4 M, 5 R, 6 P. Khớp của MCU kia: bỏ qua, không trả lời. Trả lời `OK pos <cnt> cnt <tên>` |
+| `g <độ>` | Motor đang chọn |
+| `m <tên\|1..3>` | Chọn motor cho các lệnh 1 motor: `o + - r 0 p t v k x H z j I a s`. Tên không thuộc MCU này → `ERR m ...` |
+| `e` / `d` / `c` | Cả 3 motor của MCU; `e <tên>` / `d <tên>` / `c <tên>` = 1 motor |
+| `D` | Tắt hết |
+
+Log = 10 kênh cũ của motor đang chọn + `qN/tN/iN` (N = số khớp toàn tay) cho 3 khớp của MCU, ví dụ U6:
+`en:1,duty:0,out:12.0,i_mA:150,flt:0,diag:1,pos:700,tgt:729,vel:350,mode:1,q3:700,t3:729,i3:150,q2:0,t2:0,i2:0,q1:0,t1:0,i1:0`
+
+App khi gặp ID có `keys=` (hoặc `CyberHand-G474`):
+1. Lưu MCU và danh sách khớp của cổng; tự chọn giao thức "Từng khớp".
+2. Gửi `m <khớp chính>`. Nếu khớp chính nằm ở MCU kia: không gửi `m`, console báo "Khớp X nằm ở U7 — cắm cổng U7",
+   khóa các nút 1 khớp (Home, Zero, Status, vòng hở, tốc độ, PID, Speed/Power Update, Ghi FW, Calibration).
+3. Một lần mỗi kết nối (nếu bật "Ghi cnt/90° xuống firmware khi kết nối"): với từng khớp của MCU `m <key>`, `j <cnt/90°>`
+   (và `I ...` nếu Safety xử lý tại Firmware), xong `m <khớp chính>`.
+4. Đổi "Khớp chính" → gửi `m <key>` (hoặc báo như bước 2).
+5. Khớp của MCU kia hiện "chưa kết nối" (mờ) và không được gửi lệnh. Enable / Disable / Clear fault = `e` / `d` / `c` cả MCU;
+   Manual Control có nút E / D từng khớp (`e <key>` / `d <key>`).
+
+Mô phỏng: `python tools/fw_sim.py --g474 U6` (hoặc `U7`). Chưa hỗ trợ mở 2 cổng cùng lúc.
+
 ### Đề xuất cho 6 khớp (app đã hỗ trợ sẵn)
 
 - Log: `q1..q6` (pos, count), `t1..t6` (tgt, count), `i1..i6` (mA), `en`, `flt`, `mode`.

@@ -181,8 +181,8 @@ bool Calibration::apply()
     const double c90 = fitCountsPer90();
     j->setCountsPer90(c90);
     m_console->info(tr("%1: %2 count/90°").arg(j->name(), LineParser::num(c90, 1)));
-    if (m_link->connected() && m_ctrl->protocol() == HandController::BenchSingle && m_joint == m_hand->benchJoint())
-        m_ctrl->sendCountsPer90(c90);
+    if (m_link->connected())
+        m_ctrl->sendJointCountsPer90(m_joint, c90);
     emit applied(m_joint, c90);
     return true;
 }
@@ -195,8 +195,14 @@ bool Calibration::startSweep()
         m_console->error(tr("Chưa kết nối"));
         return false;
     }
-    if (m_ctrl->protocol() == HandController::BenchSingle && m_joint != m_hand->benchJoint())
-        m_hand->setBenchJoint(m_joint);
+    // home / open loop act on the selected motor: make this joint the main joint
+    const bool g474 = !m_ctrl->portKeys().isEmpty();
+    if (g474 && !m_ctrl->jointOnPort(m_joint)) {
+        m_console->error(m_ctrl->whereIs(m_joint));
+        return false;
+    }
+    if ((m_ctrl->protocol() == HandController::BenchSingle || g474) && m_joint != m_hand->benchJoint())
+        m_hand->setBenchJoint(m_joint); // G474: sends m <key>
     m_state = Homing;
     m_clock.start();
     setStatus(tr("Đang home về chặn duỗi…"));

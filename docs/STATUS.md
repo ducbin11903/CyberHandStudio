@@ -26,6 +26,12 @@ Cập nhật: 2026-09-27
 - Mô hình 3D từ STEP (OpenGrasp-Lite): 33 mesh, ~264k tam giác, động học 4 khâu cho 4 ngón và ngón cái (docs/MODEL3D.md).
 - Firmware H562 fw 0.5: `i`, `j`, `I`, `a`, dòng `OVERI:`; đã thử logic trên máy (stub HAL) và fw_sim.
 
+### 0.3.0
+
+- Firmware MCB G474 (fw 0.7-g474): đọc `mcu=` / `keys=` trong ID, tự chọn "Từng khớp", `m <khớp chính>`,
+  đẩy `j` (và `I`) cho từng motor của MCU, khóa lệnh 1 khớp khi khớp chính ở MCU kia, khớp MCU kia hiện "chưa kết nối".
+  fw_sim `--g474 U6|U7`. Chưa: mở 2 cổng cùng lúc.
+
 ## Giả định cần Duc xác nhận
 
 - T2 = xoay ngón cái (opposition), T1 = gập ngón cái.
