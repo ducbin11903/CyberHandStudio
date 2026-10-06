@@ -79,6 +79,7 @@ private:
     enum State { Idle, Homing, Flexing };
     void refit();
     void tick();
+    void homed();
     void finish(const QString &msg, bool ok);
     void setStatus(const QString &s);
 
@@ -100,4 +101,5 @@ private:
     QTimer m_timer;
     QElapsedTimer m_clock;
     QElapsedTimer m_stall;
+    bool m_sawHomeMode = false;
 };

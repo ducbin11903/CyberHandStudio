@@ -287,7 +287,11 @@ void AppCore::onFirmwareId(int joints, double cnt90)
             if (!j)
                 continue;
             m_ctrl->send(QStringLiteral("m ") + k);
-            m_ctrl->send(QStringLiteral("j ") + LineParser::num(j->countsPer90(), 0));
+            if (j->countsPer90() >= 1)
+                m_ctrl->send(QStringLiteral("j ") + LineParser::num(j->countsPer90(), 0));
+            else
+                m_console->error(tr("%1: cnt/90° = %2 (âm) — không gửi j, sửa chiều motor/encoder trong firmware")
+                                     .arg(k, LineParser::num(j->countsPer90(), 0)));
             if (m_telemetry->overSource() == Telemetry::Firmware)
                 m_ctrl->send(HandController::protectionCommand(j->currentLimitMa(), m_telemetry->tripMs(),
                                                                fw[qBound(0, m_telemetry->overResponse(), 3)],

@@ -277,15 +277,25 @@ void Telemetry::processTelemetry(double t, const QStringList &names, const QVect
 void Telemetry::processText(const QString &line)
 {
     const QString s = line.trimmed();
-    if (s.startsWith(QLatin1String("HOME:"), Qt::CaseInsensitive)) {
-        const QString rest = s.mid(5).trimmed().toLower();
+    // "HOME: done ...", also "HOME I: done" / "HOME(I): timeout" from multi-motor firmware
+    static const QRegularExpression reHome(QStringLiteral("^HOME\\b[^:]{0,12}:\\s*(\\w+)"),
+                                           QRegularExpression::CaseInsensitiveOption);
+    const auto mh = reHome.match(s);
+    if (mh.hasMatch()) {
+        const QString rest = mh.captured(1).toLower();
         const int prev = m_homed;
-        if (rest.startsWith(QLatin1String("done")))
-            m_homed = 1;
-        else if (rest.startsWith(QLatin1String("timeout")) || rest.startsWith(QLatin1String("abort")))
-            m_homed = 0;
-        if (prev != m_homed)
-            emit homedChanged();
+        int result = -1;
+        if (rest.startsWith(QLatin1String("done")) || rest == QLatin1String("ok"))
+            result = 1;
+        else if (rest.startsWith(QLatin1String("timeout")) || rest.startsWith(QLatin1String("abort"))
+                 || rest.startsWith(QLatin1String("fail")) || rest.startsWith(QLatin1String("err")))
+            result = 0;
+        if (result >= 0) {
+            m_homed = result;
+            if (prev != m_homed)
+                emit homedChanged();
+            emit homeResult(result);
+        }
     } else if (s.startsWith(QLatin1String("OVERI:"), Qt::CaseInsensitive)) {
         // firmware reaction: "OVERI: retract i=412 mA ..." / hold / trip / warn
         const QString what = s.mid(6).trimmed().section(QLatin1Char(' '), 0, 0).toLower();

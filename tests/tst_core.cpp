@@ -6,6 +6,8 @@
 #include "core/AppCore.h"
 #include "core/CadModel.h"
 #include "core/Calibration.h"
+#include "core/ConsoleModel.h"
+#include "core/SerialLink.h"
 #include "core/HandController.h"
 #include "core/HandModel.h"
 #include "core/LineParser.h"
@@ -445,6 +447,34 @@ private slots:
         link->close();
         QVERIFY(ctrl->portKeys().isEmpty());
         QVERIFY(!hand->joint(hand->indexOfKey(QStringLiteral("M")))->offPort());
+    }
+
+    void calibrationHomeTwice()
+    {
+        // a second sweep in the same session: Homed is already Yes, the next "HOME: done" must still count
+        HandModel hand;
+        Telemetry tel(&hand);
+        SerialLink link;
+        ConsoleModel console;
+        HandController ctrl(&link, &console, &hand);
+        Calibration cal(&hand, &ctrl, &tel, &link, &console);
+        link.openVirtual();
+        cal.setJoint(hand.benchJoint());
+        for (const char *line : {"HOME: done, zero set here", "HOME I: done"}) {
+            link.clearVirtualSent();
+            QVERIFY(cal.startSweep());
+            QVERIFY(link.virtualSent().contains(QStringLiteral("e")));
+            tel.processText(QString::fromLatin1(line));
+            QVERIFY2(cal.status().contains(QStringLiteral("gập")), qPrintable(cal.status()));
+            QVERIFY(link.virtualSent().contains(QStringLiteral("o 30")));
+            cal.stopSweep();
+            QVERIFY(!cal.running());
+        }
+        QSignalSpy spy(&tel, &Telemetry::homeResult);
+        tel.processText(QStringLiteral("HOME(T1): timeout, no stop found"));
+        QCOMPARE(spy.count(), 1);
+        QCOMPARE(spy.first().at(0).toInt(), 0);
+        QCOMPARE(tel.homed(), 0);
     }
 
     void llmExtract()

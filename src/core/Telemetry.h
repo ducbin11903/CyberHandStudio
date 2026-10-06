@@ -129,6 +129,8 @@ public slots:
 signals:
     void updated();
     void homedChanged();
+    // every HOME line (also when Homed was already Yes): 1 done, 0 failed
+    void homeResult(int ok);
     void rateChanged();
     void firmwareIdChanged();
     void limitChanged();

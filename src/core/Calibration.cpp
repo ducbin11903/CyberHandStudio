@@ -19,15 +19,20 @@ Calibration::Calibration(HandModel *hand, HandController *ctrl, Telemetry *tel, 
         if (!m_link->connected() && running())
             finish(tr("Mất kết nối"), false);
     });
-    connect(m_tel, &Telemetry::homedChanged, this, [this]() {
+    connect(m_tel, &Telemetry::homeResult, this, [this](int ok) {
         if (m_state != Homing)
             return;
-        if (m_tel->homed() == 0) {
+        if (!ok) {
             finish(tr("Home thất bại"), false);
             return;
         }
-        if (m_tel->homed() != 1)
-            return;
+        homed();
+    });
+}
+
+void Calibration::homed()
+{
+    {
         // extension stop = 0 counts = joint min angle
         const Joint *j = m_hand->joint(m_joint);
         m_pts.clear();
@@ -39,7 +44,7 @@ Calibration::Calibration(HandModel *hand, HandController *ctrl, Telemetry *tel, 
         m_ctrl->setDuty(qAbs(m_sweepPct));
         setStatus(tr("Đang gập tới chặn…"));
         emit stateChanged();
-    });
+    }
 }
 
 void Calibration::setJoint(int j)
@@ -181,6 +186,12 @@ bool Calibration::apply()
     const double c90 = fitCountsPer90();
     j->setCountsPer90(c90);
     m_console->info(tr("%1: %2 count/90°").arg(j->name(), LineParser::num(c90, 1)));
+    if (c90 < 0) {
+        // gập làm count giảm: chiều encoder ngược chiều motor (+duty)
+        m_console->error(tr("%1: count/90° âm — encoder đếm ngược chiều gập. Sửa chiều motor/encoder trong firmware; "
+                            "không gửi j, PID g sẽ chạy sai chiều.").arg(j->name()));
+        return true;
+    }
     if (m_link->connected())
         m_ctrl->sendJointCountsPer90(m_joint, c90);
     emit applied(m_joint, c90);
@@ -204,6 +215,7 @@ bool Calibration::startSweep()
     if ((m_ctrl->protocol() == HandController::BenchSingle || g474) && m_joint != m_hand->benchJoint())
         m_hand->setBenchJoint(m_joint); // G474: sends m <key>
     m_state = Homing;
+    m_sawHomeMode = false;
     m_clock.start();
     setStatus(tr("Đang home về chặn duỗi…"));
     emit stateChanged();
@@ -238,6 +250,16 @@ void Calibration::finish(const QString &msg, bool ok)
 void Calibration::tick()
 {
     if (m_state == Homing) {
+        // firmware that does not print "HOME: done": homing mode (2) ended with the encoder at 0
+        if (m_tel->hasData() && m_tel->mode() == 2)
+            m_sawHomeMode = true;
+        else if (m_sawHomeMode && m_tel->hasData() && m_clock.elapsed() > 800) {
+            if (qAbs(m_tel->pos()) <= 20)
+                homed();
+            else
+                finish(tr("Home kết thúc nhưng encoder không về 0 (pos %1)").arg(m_tel->pos()), false);
+            return;
+        }
         if (m_clock.elapsed() > 15000)
             finish(tr("Home quá 15 s"), false);
         return;
