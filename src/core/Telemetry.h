@@ -37,6 +37,8 @@ class Telemetry : public QObject
     Q_PROPERTY(QString firmwareMcu READ firmwareMcu NOTIFY firmwareIdChanged)
     Q_PROPERTY(QStringList firmwareKeys READ firmwareKeys NOTIFY firmwareIdChanged)
     Q_PROPERTY(bool firmwareG474 READ firmwareG474 NOTIFY firmwareIdChanged)
+    // fw 0.8 bridge: "link=U7" = MCU reached through the UART link, "-" link down, "" not a bridge
+    Q_PROPERTY(QString firmwareLink READ firmwareLink NOTIFY firmwareIdChanged)
     Q_PROPERTY(double peakMa READ peakMa NOTIFY updated)
     Q_PROPERTY(double velCps READ velCps NOTIFY updated)
     Q_PROPERTY(double outputRpm READ outputRpm NOTIFY updated)
@@ -96,6 +98,7 @@ public:
     QString firmwareMcu() const { return m_fwMcu; }
     QStringList firmwareKeys() const { return m_fwKeys; }
     bool firmwareG474() const { return m_fwG474; }
+    QString firmwareLink() const { return m_fwLink; }
     double peakMa() const { return m_peak; }
     double currentLimitMa() const;
     void setCurrentLimitMa(double l);
@@ -155,6 +158,7 @@ private:
     QString m_fwId;
     QString m_fwMcu;
     QStringList m_fwKeys;
+    QString m_fwLink;
     bool m_fwG474 = false;
     double m_peak = 0;
     int m_response = Warn;

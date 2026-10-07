@@ -60,7 +60,47 @@ App khi gặp ID có `keys=` (hoặc `CyberHand-G474`):
 5. Khớp của MCU kia hiện "chưa kết nối" (mờ) và không được gửi lệnh. Enable / Disable / Clear fault = `e` / `d` / `c` cả MCU;
    Manual Control có nút E / D từng khớp (`e <key>` / `d <key>`).
 
-Mô phỏng: `python tools/fw_sim.py --g474 U6` (hoặc `U7`). Chưa hỗ trợ mở 2 cổng cùng lúc.
+Mô phỏng: `python tools/fw_sim.py --g474 U6` (hoặc `U7`).
+
+## 2 MCU: 1 cổng hoặc 2 cổng
+
+Communication → **Kết nối**: `1 cổng` / `2 cổng · U6 + U7`. Connect mở cả hai cổng ở chế độ 2 cổng;
+cổng 2 dùng chung Baud / Line ending với cổng 1. Mỗi cổng hiện 1 dòng trạng thái: MCU, RX, khớp, motor đang chọn, link.
+
+### Chế độ A — 2 cổng (fw 0.7 trên cả hai MCU)
+
+Mỗi cổng gửi ID riêng; app lưu MCU/khớp theo từng cổng và gửi lệnh tới cổng sở hữu khớp:
+
+| Lệnh | Đi tới |
+|---|---|
+| `g <j> <độ>` (stream, Manual, pose, timeline) | cổng có khớp j |
+| `m <key>`, `e/d/c <key>` | cổng có key |
+| `e`, `d`, `c`, `D`, `i`, `l <hz>`, `G ...` | cả hai cổng |
+| lệnh 1 motor (`o + - r 0 p t v k x H z j I a s`, `g <độ>`) | cổng của Khớp chính |
+| `@U7 <dòng>` | gửi thẳng `<dòng>` tới cổng U7 |
+
+Console: cột nguồn U6 / U7 cho mọi dòng (nhận và gửi), lọc **Nguồn**, chọn **đích** (Tự động / U6 / U7 / Cả hai).
+Telemetry: cổng của Khớp chính "dẫn nhịp" — mỗi dòng log của nó được gộp với dòng mới nhất (< 1,5 s) của cổng kia
+thành 1 mẫu 6 khớp: 10 kênh của motor chính, `qN/tN/iN` của cả hai, `flt` = OR hai MCU; 10 kênh của MCU kia
+có tiền tố (`U7.out`, `U7.en` ...) trong Data Monitor / Live. Đồng bộ `j`/`I` khi kết nối chạy riêng từng cổng.
+
+Mô phỏng: hai tiến trình `fw_sim.py --g474 U6` và `fw_sim.py --g474 U7`; app: `--port <U6> --port2 <U7>`.
+
+### Chế độ B — 1 cổng qua link UART (fw 0.8-g474)
+
+MCU có USB (master) chuyển lệnh của MCU kia qua UART4 và gộp log. App thấy 1 cổng 6 khớp:
+
+- ID: `ID: CyberHand-G474 fw 0.8-g474 joints=6 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2,M,R,P link=U7`.
+  Mất link: `keys=I,T1,T2 link=-` (app coi peer U7 đang mất).
+- Dòng chữ của MCU kia có tiền tố `[U7] ` — app bỏ tiền tố, gắn nguồn U7 trong console, vẫn xử lý `HOME:`, `OVERI:`, `OK`.
+  `[U7] ID: ...` không đổi bố cục cổng; dòng log có tiền tố (vd. sau `@U7 s`) chỉ hiện trong console.
+- `LINK: up U7` / `LINK: lost U7` (firmware in ID mới trước đó). Log thêm `lk:1|0`.
+- Mất link: khớp M, R, P mờ "chưa kết nối", lệnh tới chúng bị chặn, chip **LINK** đỏ, sự kiện LINK.
+  Link lên lại: app gửi lại `m`/`j`/`I` cho các khớp vừa quay lại.
+- `flt` bit 8 (0x100) = LINK (MCU bị bridge tự tắt motor khi mất heartbeat 300 ms) → chip LINK, Clear fault để chạy lại.
+- `@U7 <dòng>` gửi thô qua link (firmware xử lý). App bật DTR khi mở cổng và gửi `i` nếu 500 ms chưa có ID.
+
+Mô phỏng: `fw_sim.py --g474 U6 --bridge`; trong console gõ `link off` / `link on` để thử mất link.
 
 ### Đề xuất cho 6 khớp (app đã hỗ trợ sẵn)
 

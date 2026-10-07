@@ -44,7 +44,7 @@ Item {
             VSep {}
             TextLabel {
                 secondary: true
-                text: Core.link.connected ? qsTr("%1 kênh · %2 Hz").arg(root.live.channelNames.length).arg(Core.telemetry.sampleRate.toFixed(0))
+                text: Core.ctrl.connected ? qsTr("%1 kênh · %2 Hz").arg(root.live.channelNames.length).arg(Core.telemetry.sampleRate.toFixed(0))
                                           : qsTr("Kết nối để xem log")
             }
             Item { Layout.fillWidth: true }

@@ -16,7 +16,7 @@ Item {
     function sendCurrent() {
         var t = input.text.trim()
         if (!t.length) return
-        Core.ctrl.send(t)
+        Core.ctrl.sendConsole(t)
         var h = history.slice()
         if (h.length === 0 || h[h.length - 1] !== t) h.push(t)
         if (h.length > 100) h.shift()
@@ -35,6 +35,16 @@ Item {
             FlatCheck { text: qsTr("Dòng log số"); checked: root.con.showTelemetry; onToggled: root.con.showTelemetry = checked }
             FlatCheck { text: qsTr("Lệnh stream"); checked: root.con.showStreamed; onToggled: root.con.showStreamed = checked }
             FlatCheck { text: qsTr("Tự cuộn"); checked: root.autoScroll; onToggled: root.autoScroll = checked }
+            // U6 / U7 lines (2 ports or the fw 0.8 link)
+            VSep { visible: root.con.sources.length > 0 }
+            TextLabel { visible: root.con.sources.length > 0; text: qsTr("Nguồn"); secondary: true }
+            FlatCombo {
+                visible: root.con.sources.length > 0
+                Layout.preferredWidth: 90
+                model: [qsTr("Tất cả")].concat(root.con.sources)
+                currentIndex: root.con.sourceFilter.length ? root.con.sources.indexOf(root.con.sourceFilter) + 1 : 0
+                onActivated: (i) => root.con.sourceFilter = i === 0 ? "" : root.con.sources[i - 1]
+            }
             TextLabel {
                 visible: root.con.hiddenStreamed > 0 && !root.con.showStreamed
                 muted: true
@@ -75,6 +85,7 @@ Item {
                 delegate: Row {
                     width: ListView.view.width
                     spacing: 10
+                    readonly property bool tagged: root.con.sources.length > 0
                     Text {
                         text: model.time
                         color: Theme.textMuted
@@ -89,7 +100,15 @@ Item {
                         font.pixelSize: Theme.fontSmall
                     }
                     Text {
-                        width: parent.width - 120
+                        visible: parent.tagged
+                        width: 22
+                        text: model.src
+                        color: Theme.mcuColor(model.src)
+                        font.family: Theme.monoFamily
+                        font.pixelSize: Theme.fontSmall
+                    }
+                    Text {
+                        width: parent.width - (parent.tagged ? 152 : 120)
                         text: model.text
                         wrapMode: Text.WrapAnywhere
                         font.family: Theme.monoFamily
@@ -121,11 +140,21 @@ Item {
                 currentIndex: Core.link.lineEnding
                 onActivated: (i) => Core.link.lineEnding = i
             }
+            // 2 ports: where a typed line goes (auto = by command: g <j>, e/d/c/m <key>, @U7 ...)
+            FlatCombo {
+                visible: Core.ctrl.openPorts > 1
+                Layout.preferredWidth: 96
+                model: Core.ctrl.consoleTargets
+                currentIndex: Core.ctrl.consoleTarget
+                onActivated: (i) => Core.ctrl.consoleTarget = i
+            }
             FlatField {
                 id: input
                 Layout.fillWidth: true
                 font.family: Theme.monoFamily
-                placeholderText: qsTr("Lệnh CLI (h = help) · ↑/↓ lịch sử")
+                placeholderText: Core.ctrl.openPorts > 1 || root.con.sources.length > 0
+                                 ? qsTr("Lệnh CLI · @U7 <lệnh> gửi thẳng U7 · ↑/↓ lịch sử")
+                                 : qsTr("Lệnh CLI (h = help) · ↑/↓ lịch sử")
                 onAccepted: root.sendCurrent()
                 Keys.onUpPressed: {
                     if (!root.history.length) return
@@ -142,7 +171,7 @@ Item {
             FlatButton { text: qsTr("Send"); iconPath: Icons.send; accent: true; onClicked: root.sendCurrent() }
             Repeater {
                 model: ["h", "s", "i", "e", "d"]
-                FlatButton { text: modelData; onClicked: Core.ctrl.send(modelData) }
+                FlatButton { text: modelData; onClicked: Core.ctrl.sendConsole(modelData) }
             }
         }
     }

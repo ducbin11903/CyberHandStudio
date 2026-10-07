@@ -70,7 +70,7 @@ void SerialLink::refreshPorts()
         m_labels = labels;
         emit portsChanged();
     }
-    if (m_portName.isEmpty() && !m_ports.isEmpty())
+    if (m_autoSelect && m_portName.isEmpty() && !m_ports.isEmpty())
         setPortName(m_ports.first());
 }
 

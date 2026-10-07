@@ -66,6 +66,8 @@ QtObject {
     readonly property int fontLarge: 18
     readonly property int fontHuge: 24
 
+    // MCB MCUs in the console / port status
+    function mcuColor(t) { return t === "U6" ? clipSelected : (t === "U7" ? hotspot : textSecondary) }
     function jointColor(i) { return jointColors[((i % jointColors.length) + jointColors.length) % jointColors.length] }
     function seriesColor(i) { return seriesColors[((i % seriesColors.length) + seriesColors.length) % seriesColors.length] }
     function alpha(c, a) { return Qt.rgba(c.r, c.g, c.b, a) }

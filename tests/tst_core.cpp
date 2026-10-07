@@ -477,6 +477,216 @@ private slots:
         QCOMPARE(tel.homed(), 0);
     }
 
+    void dualPortRouting()
+    {
+        // 2 ports: U6 on port 1, U7 on port 2, commands routed by joint owner
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        SerialLink *a = core.link();
+        SerialLink *b = core.link2();
+        HandModel *hand = core.hand();
+        HandController *ctrl = core.ctrl();
+        auto J = [hand](const char *k) { return hand->indexOfKey(QLatin1String(k)); };
+        auto L = [](std::initializer_list<const char *> l) {
+            QStringList r;
+            for (const char *x : l)
+                r << QString::fromLatin1(x);
+            return r;
+        };
+        hand->setBenchJoint(J("I"));
+        ctrl->setDualPort(true);
+        a->openVirtual();
+        b->openVirtual();
+        QCOMPARE(ctrl->openPorts(), 2);
+        a->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2"));
+        QVERIFY(hand->joint(J("M"))->offPort()); // U7 has not answered yet
+        b->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U7 motor=1(M) keys=M,R,P"));
+        for (int i = 0; i < hand->count(); ++i)
+            QVERIFY(!hand->joint(i)->offPort());
+        QCOMPARE(ctrl->portKeys(), L({"T2", "T1", "I", "M", "R", "P"}));
+        QCOMPARE(ctrl->portMcu(), QStringLiteral("U6+U7"));
+        QCOMPARE(ctrl->portOfJoint(J("P")), 1);
+        // each MCU gets the calibration of its own motors
+        QCOMPARE(a->virtualSent(), L({"m I", "m I", "j 7000", "m T1", "j 7000", "m T2", "j 7000", "m I"}));
+        QCOMPARE(b->virtualSent(), L({"m M", "j 7000", "m R", "j 7000", "m P", "j 7000"}));
+
+        // streaming: each joint to its owner
+        a->clearVirtualSent();
+        b->clearVirtualSent();
+        ctrl->sendJoints({10, 20, 30, 40, 50, 60}, true, true);
+        QCOMPARE(a->virtualSent(), L({"g 1 10", "g 2 20", "g 3 30"}));
+        QCOMPARE(b->virtualSent(), L({"g 4 40", "g 5 50", "g 6 60"}));
+
+        // single-motor commands follow the main joint's port
+        a->clearVirtualSent();
+        b->clearVirtualSent();
+        QVERIFY(ctrl->setDuty(30));
+        QCOMPARE(a->virtualSent(), L({"o 30"}));
+        QVERIFY(b->virtualSent().isEmpty());
+        a->clearVirtualSent();
+        hand->setBenchJoint(J("R"));
+        QCOMPARE(b->virtualSent(), L({"m R"}));
+        QVERIFY(a->virtualSent().isEmpty());
+        QCOMPARE(ctrl->selectedKey(), QStringLiteral("R"));
+        QVERIFY(ctrl->home());
+        QVERIFY(b->virtualSent().last().startsWith(QLatin1String("H")));
+
+        // whole-MCU commands to both, raw lines by command
+        a->clearVirtualSent();
+        b->clearVirtualSent();
+        QVERIFY(ctrl->enable());
+        QVERIFY(ctrl->send(QStringLiteral("g 6 15")));
+        QVERIFY(ctrl->send(QStringLiteral("e T1")));
+        QVERIFY(ctrl->send(QStringLiteral("@U6 s")));
+        QVERIFY(ctrl->send(QStringLiteral("i")));
+        QVERIFY(ctrl->send(QStringLiteral("x 50")));
+        QCOMPARE(a->virtualSent(), L({"e", "e T1", "s", "i"}));
+        QCOMPARE(b->virtualSent(), L({"e", "g 6 15", "i", "x 50"}));
+
+        // console target: port 1 only
+        a->clearVirtualSent();
+        b->clearVirtualSent();
+        ctrl->setConsoleTarget(1);
+        QVERIFY(ctrl->sendConsole(QStringLiteral("s")));
+        QCOMPARE(a->virtualSent(), L({"s"}));
+        QVERIFY(b->virtualSent().isEmpty());
+        ctrl->setConsoleTarget(0);
+
+        // Tx lines tagged with the MCU
+        const QModelIndex last = core.console()->index(core.console()->rowCount() - 1);
+        QCOMPARE(last.data(ConsoleModel::SrcRole).toString(), QStringLiteral("U6"));
+
+        // port 2 closed: its joints greyed, main joint R unreachable
+        b->close();
+        QVERIFY(hand->joint(J("M"))->offPort());
+        QVERIFY(!hand->joint(J("I"))->offPort());
+        QVERIFY(!ctrl->benchOnPort());
+        QVERIFY2(ctrl->benchHint().contains(QStringLiteral("U7")), qPrintable(ctrl->benchHint()));
+        QVERIFY(!ctrl->setDuty(10));
+    }
+
+    void dualPortTelemetryMerge()
+    {
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        SerialLink *a = core.link();
+        SerialLink *b = core.link2();
+        HandModel *hand = core.hand();
+        Telemetry *tel = core.telemetry();
+        hand->setBenchJoint(hand->indexOfKey(QStringLiteral("I")));
+        core.ctrl()->setDualPort(true);
+        a->openVirtual();
+        b->openVirtual();
+        a->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2"));
+        b->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=7000 mcu=U7 motor=1(M) keys=M,R,P"));
+        QSignalSpy samples(tel, &Telemetry::sample);
+        const QString lineA = QStringLiteral("en:1,duty:0,out:12.0,i_mA:40,flt:0,diag:1,pos:3500,tgt:3500,vel:0,mode:1,"
+                                             "q1:700,t1:700,i1:10,q2:1400,t2:1400,i2:20,q3:3500,t3:3500,i3:40");
+        const QString lineB = QStringLiteral("en:0,duty:0,out:0.0,i_mA:0,flt:4,diag:1,pos:7000,tgt:0,vel:0,mode:0,"
+                                             "q4:7000,t4:7000,i4:30,q5:0,t5:0,i5:0,q6:3500,t6:3500,i6:0");
+        b->injectLine(lineB); // U6 silent so far: U7 drives the samples
+        QCOMPARE(samples.count(), 1);
+        a->injectLine(lineA); // main port: one merged sample
+        QCOMPARE(samples.count(), 2);
+        b->injectLine(lineB); // stored, published with the next U6 line
+        QCOMPARE(samples.count(), 2);
+        a->injectLine(lineA);
+        QCOMPARE(samples.count(), 3);
+        auto deg = [hand](const char *k) { return hand->joint(hand->indexOfKey(QLatin1String(k)))->measuredDeg(); };
+        QCOMPARE(deg("I"), 45.0);
+        QCOMPARE(deg("M"), 90.0);
+        QCOMPARE(deg("P"), 45.0);
+        QCOMPARE(tel->pos(), 3500.0);     // main joint I
+        QCOMPARE(tel->en(), 1);           // from U6
+        QCOMPARE(tel->flt(), 4);          // a fault of U7 is a hand fault
+        QCOMPARE(tel->totalMa(), 100.0);  // 10 + 20 + 40 + 30
+        QVERIFY(tel->fields().contains(QStringLiteral("U7.en")));
+        QVERIFY(!tel->fields().contains(QStringLiteral("U7.q4")));
+    }
+
+    void linkBridge()
+    {
+        // 1 port, fw 0.8: U6 bridges U7 over UART4
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        SerialLink *link = core.link();
+        HandModel *hand = core.hand();
+        HandController *ctrl = core.ctrl();
+        Telemetry *tel = core.telemetry();
+        auto J = [hand](const char *k) { return hand->indexOfKey(QLatin1String(k)); };
+        auto L = [](std::initializer_list<const char *> l) {
+            QStringList r;
+            for (const char *x : l)
+                r << QString::fromLatin1(x);
+            return r;
+        };
+        hand->setBenchJoint(J("I"));
+        link->openVirtual();
+        const QString id6 = QStringLiteral("ID: CyberHand-G474 fw 0.8-g474 joints=6 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2,M,R,P link=U7");
+        link->injectLine(id6);
+        QVERIFY(ctrl->portHasPeer(0));
+        for (int i = 0; i < hand->count(); ++i)
+            QVERIFY(!hand->joint(i)->offPort());
+        QCOMPARE(link->virtualSent(), L({"m I", "m I", "j 7000", "m T1", "j 7000", "m T2", "j 7000",
+                                         "m M", "j 7000", "m R", "j 7000", "m P", "j 7000", "m I"}));
+        link->clearVirtualSent();
+        ctrl->sendJoints({10, 20, 30, 40, 50, 60}, true, true);
+        QCOMPARE(link->virtualSent().size(), 6); // the firmware routes them
+        link->clearVirtualSent();
+        hand->setBenchJoint(J("M"));
+        QVERIFY(ctrl->setDuty(20));
+        QCOMPARE(link->virtualSent(), L({"m M", "o 20"}));
+
+        // text of U7 arrives with "[U7] ": prefix stripped, tagged, HOME counts, its ID ignored
+        QSignalSpy home(tel, &Telemetry::homeResult);
+        link->injectLine(QStringLiteral("[U7] HOME: done, zero set here"));
+        QCOMPARE(home.count(), 1);
+        link->injectLine(QStringLiteral("[U7] ID: CyberHand-G474 fw 0.8-g474 joints=3 cnt90=7000 mcu=U7 motor=1(M) keys=M,R,P"));
+        QCOMPARE(ctrl->portKeys().size(), 6);
+        ConsoleModel *con = core.console();
+        const QModelIndex last = con->index(con->rowCount() - 1);
+        QCOMPARE(last.data(ConsoleModel::SrcRole).toString(), QStringLiteral("U7"));
+        QVERIFY(last.data(ConsoleModel::TextRole).toString().startsWith(QLatin1String("ID:")));
+
+        // link lost: new ID without U7, LINK line
+        link->clearVirtualSent();
+        link->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.8-g474 joints=3 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2 link=-"));
+        link->injectLine(QStringLiteral("LINK: lost U7"));
+        QVERIFY(hand->joint(J("M"))->offPort());
+        QVERIFY(!ctrl->benchOnPort());
+        QVERIFY(!ctrl->setDuty(20));
+        QVERIFY(link->virtualSent().isEmpty());
+        QCOMPARE(tel->recentEvent(), QStringLiteral("LINK"));
+
+        // link back: the joints of U7 get their calibration again
+        link->injectLine(id6);
+        link->injectLine(QStringLiteral("LINK: up U7"));
+        QVERIFY(!hand->joint(J("M"))->offPort());
+        QCOMPARE(link->virtualSent(), L({"m M", "m M", "j 7000", "m R", "j 7000", "m P", "j 7000", "m M"}));
+
+        // lk:0 in the log also drops the joints of U7
+        link->injectLine(QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:256,diag:1,pos:0,tgt:0,vel:0,mode:0,q1:0,q4:0,lk:0"));
+        QVERIFY(hand->joint(J("R"))->offPort());
+        QVERIFY(Telemetry::faultText(256).contains(QStringLiteral("LINK")));
+    }
+
+    void consoleSourceFilter()
+    {
+        ConsoleModel con;
+        con.append(ConsoleModel::Rx, QStringLiteral("OK m 1 I"), QStringLiteral("U6"));
+        con.append(ConsoleModel::Rx, QStringLiteral("OK m 1 M"), QStringLiteral("U7"));
+        con.info(QStringLiteral("app line"));
+        QCOMPARE(con.rowCount(), 3);
+        QCOMPARE(con.sources(), (QStringList{QStringLiteral("U6"), QStringLiteral("U7")}));
+        con.setSourceFilter(QStringLiteral("U7"));
+        QCOMPARE(con.rowCount(), 2); // U7 + untagged app line
+        QCOMPARE(con.index(0).data(ConsoleModel::TextRole).toString(), QStringLiteral("OK m 1 M"));
+        con.append(ConsoleModel::Rx, QStringLiteral("hidden"), QStringLiteral("U6"));
+        QCOMPARE(con.rowCount(), 2);
+        con.setSourceFilter(QString());
+        QCOMPARE(con.rowCount(), 4);
+    }
+
     void llmExtract()
     {
         const QString reply = QStringLiteral("Here you go:\n```csv\nt,T2,T1,I,M,R,P\n0,0,0,0,0,0,0\n1,10,20,30,40,50,60\n```\nEnjoy");

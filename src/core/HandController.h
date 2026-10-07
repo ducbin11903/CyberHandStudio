@@ -1,13 +1,18 @@
 #pragma once
 
 #include <QObject>
+#include <QVariantList>
 #include <QVector>
 
 class SerialLink;
 class ConsoleModel;
 class HandModel;
 
-// Turns UI actions into CLI command lines (one action = one line).
+// Turns UI actions into CLI command lines (one action = one line) and routes them to
+// the serial port that owns the joint.
+// MCB G474: two MCUs with 3 motors each (U6 = I, T1, T2 | U7 = M, R, P).
+//  - 1 port: fw 0.7 sees 3 joints; fw 0.8 with the UART link bridges the other MCU (keys = all 6).
+//  - 2 ports: one USB port per MCU, the app routes per joint.
 class HandController : public QObject
 {
     Q_OBJECT
@@ -24,10 +29,23 @@ class HandController : public QObject
     Q_PROPERTY(double powerRate READ powerRate WRITE setPowerRate NOTIFY settingsChanged)
     Q_PROPERTY(QString lastCommand READ lastCommand NOTIFY lastCommandChanged)
     Q_PROPERTY(QStringList protocolNames READ protocolNames CONSTANT)
-    // MCB G474: one USB port per MCU, 3 motors each (U6 = I, T1, T2 | U7 = M, R, P)
+    // any port open
+    Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
+    Q_PROPERTY(int openPorts READ openPorts NOTIFY connectedChanged)
+    // "2 cổng" mode: Connect opens port 1 and port 2
+    Q_PROPERTY(bool dualPort READ dualPort WRITE setDualPort NOTIFY dualPortChanged)
+    // per port: open, name, label, mcu, keys, selected, peer, peerUp, id, main
+    Q_PROPERTY(QVariantList ports READ ports NOTIFY portChanged)
+    // MCU of the open ports ("U6", "U6+U7") and the joints they reach
     Q_PROPERTY(QString portMcu READ portMcu NOTIFY portChanged)
     Q_PROPERTY(QStringList portKeys READ portKeys NOTIFY portChanged)
+    Q_PROPERTY(bool layoutKnown READ layoutKnown NOTIFY portChanged)
+    // motor selected (m <key>) on the port of the main joint
     Q_PROPERTY(QString selectedKey READ selectedKey NOTIFY portChanged)
+    Q_PROPERTY(QString idText READ idText NOTIFY portChanged)
+    // console with 2 ports: 0 auto (by command), 1 port 1, 2 port 2, 3 both
+    Q_PROPERTY(int consoleTarget READ consoleTarget WRITE setConsoleTarget NOTIFY consoleTargetChanged)
+    Q_PROPERTY(QStringList consoleTargets READ consoleTargets NOTIFY portChanged)
     // single-motor commands (o + - r 0 p t v k x H z j I a s) reach the main joint
     Q_PROPERTY(bool benchOnPort READ benchOnPort NOTIFY portChanged)
     Q_PROPERTY(QString benchHint READ benchHint NOTIFY portChanged)
@@ -37,6 +55,9 @@ public:
     Q_ENUM(Protocol)
 
     HandController(SerialLink *link, ConsoleModel *console, HandModel *hand, QObject *parent = nullptr);
+    // second USB port (2-port mode); index 1
+    void addLink(SerialLink *link);
+    SerialLink *linkAt(int port) const;
 
     int protocol() const { return m_protocol; }
     void setProtocol(int p);
@@ -64,17 +85,24 @@ public:
     QString lastCommand() const { return m_last; }
     QStringList protocolNames() const;
 
-    // raw line typed by the user or a macro
+    // raw line typed by the user or a macro; with 2 ports routed by the command
+    // (g <j>, e/d/c/m <key> -> owner, e d c D i l G -> both, "@U7 s" -> U7, rest -> main joint's port)
     Q_INVOKABLE bool send(const QString &line);
+    // console input: send() or the port picked in consoleTarget
+    Q_INVOKABLE bool sendConsole(const QString &line);
+    // one port, no routing
+    Q_INVOKABLE bool sendTo(int port, const QString &line);
+    // every open port
+    Q_INVOKABLE bool sendAll(const QString &line);
 
-    // e / d / c without a joint = every motor of the MCU
-    Q_INVOKABLE bool enable() { return send(QStringLiteral("e")); }
-    Q_INVOKABLE bool disable() { return send(QStringLiteral("d")); }
+    // e / d / c without a joint = every motor of the MCU (both MCUs with 2 ports)
+    Q_INVOKABLE bool enable() { return sendAll(QStringLiteral("e")); }
+    Q_INVOKABLE bool disable() { return sendAll(QStringLiteral("d")); }
     Q_INVOKABLE bool home();
     Q_INVOKABLE bool zero() { return sendSingle(QStringLiteral("z")); }
-    Q_INVOKABLE bool clearFault() { return send(QStringLiteral("c")); }
+    Q_INVOKABLE bool clearFault() { return sendAll(QStringLiteral("c")); }
     Q_INVOKABLE bool status() { return sendSingle(QStringLiteral("s")); }
-    Q_INVOKABLE bool help() { return send(QStringLiteral("h")); }
+    Q_INVOKABLE bool help() { return sendTo(mainPort(), QStringLiteral("h")); }
     Q_INVOKABLE bool stopOpenLoop() { return sendSingle(QStringLiteral("0")); }
     Q_INVOKABLE bool hold() { return sendSingle(QStringLiteral("v 0")); }
     Q_INVOKABLE bool setDuty(double pct);
@@ -93,7 +121,7 @@ public:
     Q_INVOKABLE bool applyLogRate();
     Q_INVOKABLE bool applyPose(const QVariantList &deg);
     Q_INVOKABLE bool applyPowerRate();
-    Q_INVOKABLE bool requestId() { return send(QStringLiteral("i")); }
+    Q_INVOKABLE bool requestId() { return sendAll(QStringLiteral("i")); }
     // firmware joint calibration: counts at 90 deg (`j <cnt>`)
     Q_INVOKABLE bool sendCountsPer90(double cnt);
     // firmware over-current protection: `I <mA> <ms> <resp> <deg>`,
@@ -102,17 +130,43 @@ public:
     // send the joint commands as they are now (manual sliders)
     Q_INVOKABLE int streamCommands(bool force = false);
 
-    QString portMcu() const { return m_mcu; }
-    QStringList portKeys() const { return m_keys; }
-    QString selectedKey() const { return m_selected; }
+    bool connected() const;
+    int openPorts() const;
+    bool portOpen(int port) const;
+    bool dualPort() const { return m_dual; }
+    void setDualPort(bool d);
+    QVariantList ports() const;
+    QString portMcu() const;
+    QStringList portKeys() const;
+    bool layoutKnown() const;
+    QString selectedKey() const;
+    QString idText() const;
+    int consoleTarget() const { return m_consoleTarget; }
+    void setConsoleTarget(int t);
+    QStringList consoleTargets() const;
     bool benchOnPort() const;
     QString benchHint() const;
-    // ID line of a G474 MCU: its name and the joints of motors 1..3
-    void setPortInfo(const QString &mcu, const QStringList &keys);
-    void clearPortInfo();
-    // true when no MCU layout is known (single bench board) or the joint is on this port
+    // ID line of the firmware on a port (any firmware): shown per port
+    void setPortId(int port, const QString &id);
+    // G474 ID: MCU name, joints of its motors (fw 0.8 bridge: all 6), peer MCU behind the UART link
+    void setPortInfo(int port, const QString &mcu, const QStringList &keys, const QString &peer = QString());
+    void clearPortInfo(int port);
+    // fw 0.8 link state ("LINK: up U7" / "LINK: lost U7", log field lk); true if it changed
+    bool setPeerUp(int port, bool up, const QString &peer = QString());
+    bool portHasPeer(int port) const;
+    // -1 unknown / no peer, 0 lost, 1 up
+    int peerState(int port) const { return (port >= 0 && port < m_ports.size()) ? m_ports[port].peerUp : -1; }
+    // "U6" once the ID is known, else the port name
+    Q_INVOKABLE QString portLabel(int port) const;
+    // open port reporting this MCU, -1 if none
+    Q_INVOKABLE int portOfMcu(const QString &mcu) const;
+    // port that drives the joint: -1 if no open port has it (layout known) or nothing is open
+    Q_INVOKABLE int portOfJoint(int joint) const;
+    // port of the main joint (single-motor commands), else the first open port
+    Q_INVOKABLE int mainPort() const;
+    // true when no MCU layout is known (single bench board) or an open port drives the joint
     Q_INVOKABLE bool jointOnPort(int joint) const;
-    // "Khớp M (Middle) nằm ở U7 — cắm cổng U7"
+    // "Khớp M (Middle) nằm ở U7 — cổng U7 chưa mở"
     Q_INVOKABLE QString whereIs(int joint) const;
     // `m <key of the main joint>`; false (and a console note when warn) if not on this port
     Q_INVOKABLE bool selectBenchMotor(bool warn = true);
@@ -127,18 +181,38 @@ public:
 
 signals:
     void portChanged();
+    void connectedChanged();
+    void dualPortChanged();
+    void consoleTargetChanged();
     void protocolChanged();
     void settingsChanged();
     void lastCommandChanged();
 
 private:
+    struct Port {
+        SerialLink *link = nullptr;
+        QString mcu;        // ID mcu=
+        QStringList keys;   // ID keys=
+        QString selected;   // last m <key>
+        QString peer;       // ID link= (fw 0.8 bridge)
+        int peerUp = -1;    // -1 unknown, 0 lost, 1 up
+        QString id;         // ID text
+    };
     bool write(const QString &line, bool quiet);
-    // single-motor command: refused (console note) when the main joint is on the other MCU
+    bool writeTo(int port, const QString &line, bool quiet);
+    // single-motor command: refused (console note) when no open port drives the main joint
     bool sendSingle(const QString &line);
     void updateJointFlags();
+    void onLinkConnection(int port);
     QString jointCommand(int joint, double deg) const;
+    // keys the port can drive now (bridge keys of a lost peer removed)
+    QStringList effectiveKeys(int port) const;
+    QVector<int> openPortList() const;
+    QVector<int> routeOf(QString &line) const;
+    int portOfToken(const QString &tok, bool jointNumbers) const;
+    int portFor(int joint) const;
 
-    SerialLink *m_link;
+    QVector<Port> m_ports;
     ConsoleModel *m_console;
     HandModel *m_hand;
     int m_protocol = BenchSingle;
@@ -152,7 +226,6 @@ private:
     double m_powerRate = 50;
     QString m_last;
     QVector<double> m_lastSent;
-    QString m_mcu;
-    QStringList m_keys;
-    QString m_selected;
+    bool m_dual = false;
+    int m_consoleTarget = 0;
 };

@@ -132,6 +132,7 @@ void Telemetry::reset()
         m_fwId.clear();
         m_fwMcu.clear();
         m_fwKeys.clear();
+        m_fwLink.clear();
         m_fwG474 = false;
         emit firmwareIdChanged();
     }
@@ -150,6 +151,7 @@ QString Telemetry::faultText(int flt)
     if (flt & 1) l << QStringLiteral("DIAG");
     if (flt & 2) l << QStringLiteral("Quá dòng");
     if (flt & 4) l << QStringLiteral("KEY");
+    if (flt & 0x100) l << QStringLiteral("LINK"); // fw 0.8: UART link to the other MCU lost
     return l.join(QStringLiteral(" · "));
 }
 
@@ -319,6 +321,14 @@ void Telemetry::processText(const QString &line)
                 m_fwKeys << (idx >= 0 ? m_hand->joint(idx)->key() : k.trimmed());
             }
         }
+        static const QRegularExpression reLink(QStringLiteral("\\blink\\s*=\\s*(\\S+)"));
+        const auto ml = reLink.match(s);
+        m_fwLink = ml.hasMatch() ? ml.captured(1) : QString();
+        // bridge firmware with the link down: "-"
+        static const QStringList none = {QStringLiteral("-"), QStringLiteral("none"), QStringLiteral("off"),
+                                         QStringLiteral("0"), QStringLiteral("lost")};
+        if (none.contains(m_fwLink, Qt::CaseInsensitive))
+            m_fwLink = QStringLiteral("-");
         m_fwG474 = s.contains(QLatin1String("CyberHand-G474"), Qt::CaseInsensitive) || !m_fwKeys.isEmpty();
         emit firmwareIdChanged();
         static const QRegularExpression reJ(QStringLiteral("joints\\s*=\\s*(\\d+)"));

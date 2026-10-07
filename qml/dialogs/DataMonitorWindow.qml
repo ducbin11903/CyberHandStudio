@@ -57,7 +57,13 @@ ToolWindow {
         spacing: 0
         Layout.fillWidth: true
         TextLabel { text: st.title; secondary: true; font.pixelSize: Theme.fontTiny }
-        TextLabel { text: st.value; font.pixelSize: Theme.fontSize + 1 }
+        TextLabel {
+            text: st.value
+            font.pixelSize: Theme.fontSize + 1
+            Layout.fillWidth: true
+            Layout.maximumWidth: win.width / 3
+            elide: Text.ElideMiddle
+        }
     }
     component H: TextLabel { secondary: true; font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 54 }
     component V: TextLabel { font.pixelSize: Theme.fontSmall; horizontalAlignment: Text.AlignRight; Layout.preferredWidth: 54 }
@@ -82,16 +88,33 @@ ToolWindow {
             columns: 6
             columnSpacing: 8
             rowSpacing: 4
-            Stat { title: qsTr("Cổng"); value: Core.link.connected ? Core.link.portName + " @ " + Core.link.baudRate : "—" }
+            Stat {
+                title: qsTr("Cổng")
+                value: {
+                    var l = []
+                    var p = Core.ctrl.ports
+                    for (var i = 0; i < p.length; ++i)
+                        if (p[i].open) l.push(p[i].name + (p[i].mcu.length ? " (" + p[i].mcu + ")" : ""))
+                    return l.length ? l.join(" + ") + " @ " + Core.link.baudRate : "—"
+                }
+            }
             Stat { title: qsTr("Log"); value: Core.telemetry.sampleRate.toFixed(0) + " Hz" }
-            Stat { title: qsTr("Dòng/s"); value: Core.link.linesPerSec.toFixed(1) }
-            Stat { title: qsTr("RX"); value: Math.round(Core.link.rxBytesPerSec) + " B/s" }
-            Stat { title: qsTr("Dòng cuối"); value: Core.link.lastLineAgeMs < 0 ? "—" : Core.link.lastLineAgeMs + " ms" }
+            Stat { title: qsTr("Dòng/s"); value: (Core.link.linesPerSec + Core.link2.linesPerSec).toFixed(1) }
+            Stat { title: qsTr("RX"); value: Math.round(Core.link.rxBytesPerSec + Core.link2.rxBytesPerSec) + " B/s" }
+            Stat {
+                title: qsTr("Dòng cuối")
+                value: {
+                    var a = Core.link.connected ? Core.link.lastLineAgeMs : -1
+                    var b = Core.link2.connected ? Core.link2.lastLineAgeMs : -1
+                    var m = Math.max(a, b)
+                    return m < 0 ? "—" : m + " ms"
+                }
+            }
             Stat { title: qsTr("Tổng dòng"); value: Math.round(Core.telemetry.totalMa) + " mA" }
         }
         TextLabel {
             Layout.fillWidth: true
-            text: Core.telemetry.firmwareId.length ? "ID: " + Core.telemetry.firmwareId : qsTr("Firmware chưa gửi ID (lệnh i)")
+            text: Core.ctrl.idText.length ? "ID: " + Core.ctrl.idText.replace(/\n/g, "\nID: ") : qsTr("Firmware chưa gửi ID (lệnh i)")
             muted: true
             font.pixelSize: Theme.fontSmall
         }

@@ -9,7 +9,22 @@ Card {
     id: root
     readonly property var tel: Core.telemetry
     readonly property var bench: Core.hand.joints[Core.hand.benchJoint]
-    readonly property bool live: Core.link.connected && tel.hasData
+    readonly property bool live: Core.ctrl.connected && tel.hasData
+    // the 10 log channels belong to the main joint only when a port drives it
+    readonly property bool mainLive: live && Core.ctrl.benchOnPort
+    // fw 0.8: a port bridging the other MCU (LINK chip), link state
+    readonly property bool linkMode: {
+        var p = Core.ctrl.ports
+        for (var i = 0; i < p.length; ++i)
+            if (p[i].open && p[i].peer.length) return true
+        return (tel.flt & 0x100) !== 0
+    }
+    readonly property bool linkLost: {
+        var p = Core.ctrl.ports
+        for (var i = 0; i < p.length; ++i)
+            if (p[i].open && p[i].peer.length && p[i].peerUp === 0) return true
+        return false
+    }
 
     function f1(v) { return (v === undefined || isNaN(v)) ? "—" : Number(v).toFixed(1) }
     function f0(v) { return (v === undefined || isNaN(v)) ? "—" : Math.round(v) }
@@ -66,12 +81,12 @@ Card {
 
             Readout {
                 title: qsTr("Driver")
-                value: !root.live ? "—" : (root.tel.en ? "ON" : "OFF")
-                valueColor: root.live && root.tel.en ? Theme.accentGreen : Theme.textSecondary
+                value: !root.mainLive ? "—" : (root.tel.en ? "ON" : "OFF")
+                valueColor: root.mainLive && root.tel.en ? Theme.accentGreen : Theme.textSecondary
             }
             Readout {
                 title: qsTr("Mode")
-                value: !root.live ? "—" : ["Open", "PID", "Home"][root.tel.mode] || ("" + root.tel.mode)
+                value: !root.mainLive ? "—" : ["Open", "PID", "Home"][root.tel.mode] || ("" + root.tel.mode)
             }
             Readout {
                 title: qsTr("Homed")
@@ -80,29 +95,29 @@ Card {
             }
             Readout {
                 title: qsTr("Duty out")
-                value: root.live ? root.f1(root.tel.out) : "—"
+                value: root.mainLive ? root.f1(root.tel.out) : "—"
                 sub: "%"
             }
             Readout {
                 title: qsTr("Position") + (root.bench ? " · " + root.bench.key : "")
-                value: root.live ? root.f1(root.tel.posDeg) : "—"
-                sub: root.live ? "° · " + root.f0(root.tel.pos) + " cnt" : "°"
+                value: root.mainLive ? root.f1(root.tel.posDeg) : "—"
+                sub: root.mainLive ? "° · " + root.f0(root.tel.pos) + " cnt" : "°"
             }
             Readout {
                 title: qsTr("Target")
-                value: root.live && root.tel.mode === 1 ? root.f1(root.tel.tgtDeg) : "—"
-                sub: root.live && root.tel.mode === 1 ? "° · " + root.f0(root.tel.tgt) + " cnt" : "°"
+                value: root.mainLive && root.tel.mode === 1 ? root.f1(root.tel.tgtDeg) : "—"
+                sub: root.mainLive && root.tel.mode === 1 ? "° · " + root.f0(root.tel.tgt) + " cnt" : "°"
             }
             Readout {
                 title: qsTr("Error")
-                value: root.live && root.tel.mode === 1 ? root.f1(root.tel.errorDeg) : "—"
+                value: root.mainLive && root.tel.mode === 1 ? root.f1(root.tel.errorDeg) : "—"
                 sub: "°"
                 valueColor: Math.abs(root.tel.errorDeg) > 5 ? Theme.warnAmber : Theme.textStrong
             }
             Readout {
                 title: qsTr("Velocity (khớp)")
-                value: root.live ? root.f0(root.tel.velDeg) : "—"
-                sub: root.live ? "°/s · " + Number(root.tel.outputRpm).toFixed(1) + " RPM" : "°/s"
+                value: root.mainLive ? root.f0(root.tel.velDeg) : "—"
+                sub: root.mainLive ? "°/s · " + Number(root.tel.outputRpm).toFixed(1) + " RPM" : "°/s"
             }
         }
 
@@ -114,9 +129,11 @@ Card {
             spacing: 4
             TextLabel { text: qsTr("Faults"); secondary: true; font.pixelSize: Theme.fontTiny; Layout.preferredWidth: 42 }
             Repeater {
-                model: [{ bit: 1, name: "DIAG" }, { bit: 2, name: qsTr("Quá dòng") }, { bit: 4, name: "KEY" }]
+                model: [{ bit: 1, name: "DIAG" }, { bit: 2, name: qsTr("Quá dòng") }, { bit: 4, name: "KEY" }, { bit: 0x100, name: "LINK" }]
                 Badge {
-                    readonly property bool active: root.live && ((root.tel.flt & modelData.bit) || (modelData.bit === 1 && root.tel.diagLow))
+                    visible: modelData.bit !== 0x100 || root.linkMode
+                    readonly property bool active: root.live && ((root.tel.flt & modelData.bit) || (modelData.bit === 1 && root.tel.diagLow)
+                                                                 || (modelData.bit === 0x100 && root.linkLost))
                     text: modelData.name
                     fill: active ? Theme.liveRed : Theme.bgSunken
                     textColor: active ? Theme.textStrong : Theme.textMuted
@@ -138,6 +155,8 @@ Card {
                 if (!root.live) return ""
                 var m = []
                 if (root.tel.diagLow) m.push(qsTr("Chân DIAG đang thấp khi driver bật: driver lỗi hoặc mất nguồn motor."))
+                if (root.linkLost) m.push(qsTr("Link UART tới MCU kia mất: khớp của MCU đó bị khóa."))
+                else if (root.tel.flt & 0x100) m.push(qsTr("MCU kia đã tắt motor do mất link (watchdog). Link đã lên lại: Clear fault (c) để chạy tiếp."))
                 if (root.tel.noMotion && Math.abs(root.tel.iMa) < 20)
                     m.push(qsTr("Có duty nhưng không quay và không có dòng: kiểm tra nguồn motor, dây motor/encoder."))
                 else if (root.tel.noMotion)
@@ -244,7 +263,7 @@ Card {
                 Rectangle { Layout.fillWidth: true; height: 1; color: Theme.divider }
                 RowLayout {
                     TextLabel { text: qsTr("Actual"); Layout.fillWidth: true }
-                    ValueBox { text: root.live ? Math.round(root.tel.iMa) : "—" }
+                    ValueBox { text: root.mainLive ? Math.round(root.tel.iMa) : "—" }
                 }
                 RowLayout {
                     TextLabel { text: qsTr("Peak"); Layout.fillWidth: true }
@@ -271,8 +290,8 @@ Card {
                 Item { Layout.fillHeight: true }
                 TextLabel {
                     Layout.fillWidth: true
-                    visible: Core.telemetry.firmwareId.length > 0
-                    text: Core.telemetry.firmwareId
+                    visible: text.length > 0
+                    text: Core.ctrl.idText.length ? Core.ctrl.idText : Core.telemetry.firmwareId
                     muted: true
                     font.pixelSize: Theme.fontTiny
                     wrapMode: Text.WordWrap

@@ -51,6 +51,9 @@ public:
     // seconds since the port was opened (time base for telemetry)
     double elapsed() const { return m_clock.isValid() ? m_clock.nsecsElapsed() / 1e9 : 0.0; }
 
+    // pick the first port when none is set (port 1); port 2 leaves the choice to the user
+    void setAutoSelect(bool a) { m_autoSelect = a; }
+
     Q_INVOKABLE void refreshPorts();
     Q_INVOKABLE bool open();
     Q_INVOKABLE void close();
@@ -99,5 +102,6 @@ private:
     double m_rxRate = 0, m_txRate = 0, m_lineRate = 0;
     bool m_lastWasCR = false;
     bool m_virtual = false;
+    bool m_autoSelect = true;
     QStringList m_virtualSent;
 };

@@ -30,6 +30,8 @@ class AppCore : public QObject
     Q_OBJECT
     Q_PROPERTY(QString version READ version CONSTANT)
     Q_PROPERTY(SerialLink *link READ link CONSTANT)
+    // second USB port (2-port mode: one port per MCU)
+    Q_PROPERTY(SerialLink *link2 READ link2 CONSTANT)
     Q_PROPERTY(ConsoleModel *console READ console CONSTANT)
     Q_PROPERTY(HandModel *hand READ hand CONSTANT)
     Q_PROPERTY(Telemetry *telemetry READ telemetry CONSTANT)
@@ -67,6 +69,10 @@ public:
 
     QString version() const { return QStringLiteral(CH_VERSION); }
     SerialLink *link() const { return m_link; }
+    SerialLink *link2() const { return m_link2; }
+    // Connect / Disconnect: port 1, plus port 2 in 2-port mode
+    Q_INVOKABLE bool toggleConnection();
+    void openPort2AtStart(const QString &port);
     ConsoleModel *console() const { return m_console; }
     HandModel *hand() const { return m_hand; }
     Telemetry *telemetry() const { return m_telemetry; }
@@ -117,7 +123,17 @@ signals:
     void firmwareConfigurableChanged();
 
 private:
-    void onLine(const QString &line, double t);
+    void onLine(int port, const QString &line);
+    void onPortConnection(int port);
+    // 2 ports: each port's latest log, merged into one 6-joint sample
+    void onTelemetryLine(int port, double t, const QStringList &names, const QVector<double> &values);
+    // fw 0.8: "LINK: up U7" / "LINK: lost U7"
+    void onLinkLine(int port, const QString &state, const QString &peer, const QString &text);
+    void reportPeer(int port, bool up, const QString &text);
+    // joints no open port drives keep no stale feedback
+    void clearUnreachableFeedback();
+    QString rxTag(int port) const;
+    QString txTag(int port) const;
     QJsonObject collect() const;
     void apply(const QJsonObject &o);
     void installExamples();
@@ -126,6 +142,7 @@ private:
     void onFirmwareId(int joints, double cnt90);
 
     SerialLink *m_link;
+    SerialLink *m_link2;
     ConsoleModel *m_console;
     HandModel *m_hand;
     Telemetry *m_telemetry;
@@ -147,8 +164,19 @@ private:
     CadModel *m_cad;
     double m_refreshHz = 30;
     bool m_fwConfigurable = false;
-    bool m_fwSynced = false;
-    QTimer m_idTimer;
+    QTimer m_idTimer[2];
+    bool m_gotId[2] = {false, false};
+    // joints whose j / I went to the firmware on this connection (per port)
+    QStringList m_synced[2];
+    // port whose text line is being parsed (ID -> onFirmwareId)
+    int m_rxPort = 0;
+    QElapsedTimer m_rxClock;
+    struct PortLog {
+        QStringList names;
+        QVector<double> values;
+        QElapsedTimer age;
+    };
+    PortLog m_portLog[2];
     QString m_mode = QStringLiteral("text");
     QVariantMap m_ui;
     QTimer m_compileTimer;

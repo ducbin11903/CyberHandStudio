@@ -18,6 +18,13 @@ ToolWindow {
     property bool live: true
     property bool output: true
     readonly property var joints: Core.hand.joints
+    // joints no open port drives (other MCU not connected / link lost)
+    readonly property var offKeys: {
+        var l = []
+        for (var i = 0; i < joints.length; ++i)
+            if (joints[i].offPort) l.push(joints[i].key)
+        return l
+    }
     readonly property real totalLimit: {
         var s = 0
         for (var i = 0; i < joints.length; ++i) s += joints[i].currentLimitMa
@@ -70,9 +77,9 @@ ToolWindow {
         }
         TextLabel {
             Layout.fillWidth: true
-            visible: Core.ctrl.protocol === 0 || Core.ctrl.portKeys.length > 0
-            text: Core.ctrl.portKeys.length > 0
-                  ? qsTr("Cổng %1: chỉ gửi %2; khớp mờ nằm ở MCU kia, chỉ cập nhật mô phỏng.").arg(Core.ctrl.portMcu).arg(Core.ctrl.portKeys.join(", "))
+            visible: Core.ctrl.protocol === 0 || win.offKeys.length > 0
+            text: win.offKeys.length > 0
+                  ? qsTr("Cổng %1: gửi %2; khớp %3 chưa có cổng (MCU kia chưa kết nối) — chỉ cập nhật mô phỏng.").arg(Core.ctrl.portMcu).arg(Core.ctrl.portKeys.join(", ")).arg(win.offKeys.join(", "))
                   : qsTr("Giao thức Bench 1 khớp: chỉ %1 được gửi tới tay, các khớp khác chỉ cập nhật mô phỏng.").arg(Core.hand.joints[Core.hand.benchJoint].name)
             muted: true
             font.pixelSize: Theme.fontSmall
@@ -117,7 +124,7 @@ ToolWindow {
                         // G474: one motor of the MCU on / off (e <key> / d <key>)
                         RowLayout {
                             Layout.alignment: Qt.AlignHCenter
-                            visible: Core.ctrl.portKeys.length > 0 && !col.j.offPort
+                            visible: Core.ctrl.layoutKnown && !col.j.offPort
                             spacing: 2
                             FlatButton { text: "E"; tip: "e " + col.j.key; onClicked: Core.ctrl.enableJoint(index) }
                             FlatButton { text: "D"; danger: true; tip: "d " + col.j.key; onClicked: Core.ctrl.disableJoint(index) }
@@ -218,7 +225,7 @@ ToolWindow {
                     color: Core.telemetry.overLimit ? Theme.liveRed : Theme.barText
                 }
             }
-            ValueBox { Layout.preferredWidth: 90; text: Core.link.connected && Core.telemetry.hasData ? Math.round(Core.telemetry.totalMa) + " mA" : "—" }
+            ValueBox { Layout.preferredWidth: 90; text: Core.ctrl.connected && Core.telemetry.hasData ? Math.round(Core.telemetry.totalMa) + " mA" : "—" }
         }
     }
 }

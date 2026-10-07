@@ -15,10 +15,13 @@ Calibration::Calibration(HandModel *hand, HandController *ctrl, Telemetry *tel, 
 {
     m_timer.setInterval(50);
     connect(&m_timer, &QTimer::timeout, this, &Calibration::tick);
-    connect(m_link, &SerialLink::connectedChanged, this, [this]() {
-        if (!m_link->connected() && running())
+    // the port of this joint went away (unplugged, link to the other MCU lost)
+    auto lost = [this]() {
+        if (running() && (!m_ctrl->connected() || !m_ctrl->jointOnPort(m_joint)))
             finish(tr("Mất kết nối"), false);
-    });
+    };
+    connect(m_ctrl, &HandController::connectedChanged, this, lost);
+    connect(m_ctrl, &HandController::portChanged, this, lost);
     connect(m_tel, &Telemetry::homeResult, this, [this](int ok) {
         if (m_state != Homing)
             return;
@@ -192,7 +195,7 @@ bool Calibration::apply()
                             "không gửi j, PID g sẽ chạy sai chiều.").arg(j->name()));
         return true;
     }
-    if (m_link->connected())
+    if (m_ctrl->connected())
         m_ctrl->sendJointCountsPer90(m_joint, c90);
     emit applied(m_joint, c90);
     return true;
@@ -202,12 +205,12 @@ bool Calibration::startSweep()
 {
     if (running())
         return false;
-    if (!m_link->connected()) {
+    if (!m_ctrl->connected()) {
         m_console->error(tr("Chưa kết nối"));
         return false;
     }
     // home / open loop act on the selected motor: make this joint the main joint
-    const bool g474 = !m_ctrl->portKeys().isEmpty();
+    const bool g474 = m_ctrl->layoutKnown();
     if (g474 && !m_ctrl->jointOnPort(m_joint)) {
         m_console->error(m_ctrl->whereIs(m_joint));
         return false;

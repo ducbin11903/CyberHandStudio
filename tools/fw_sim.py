@@ -13,6 +13,10 @@ Options: --joints 6 to emulate the proposed 6-joint log (q1..q6, t1..t6, i1..i6)
          U6 = I, T1, T2 and U7 = M, R, P (motor 1/2/3), commands m / e d c [key] / D,
          g <joint 1-6|key> <deg> (joints of the other MCU are ignored without a reply),
          log = 10 channels of the selected motor + qN/tN/iN for the 3 joints.
+         --g474 U6 --bridge: fw 0.8-g474 with the UART link, this MCU has the USB port and
+         bridges the other one (keys = all 6, link=U7, text of U7 prefixed "[U7] ",
+         @U7 <line> raw, `link on|off` to simulate losing the link, log + lk:1).
+Two ports (app mode "2 cổng"): run two sims, --g474 U6 and --g474 U7.
 """
 import argparse
 import math
@@ -359,7 +363,7 @@ APP_ORDER = ["T2", "T1", "I", "M", "R", "P"]   # joint numbers 1..6 used by g <j
 
 
 class G474:
-    def __init__(self, mcu, write):
+    def __init__(self, mcu, write, banner=True):
         self.write = write
         self.mcu = mcu
         self.keys = G474_KEYS[mcu]
@@ -374,8 +378,9 @@ class G474:
             fw.log_hz = 0
             self.ch.append(fw)
         self._mute = False
-        self.write("USBX: OK")
-        self.write(self.id_line())
+        if banner:
+            self.write("USBX: OK")
+            self.write(self.id_line())
 
     @property
     def no_vm(self):
@@ -507,18 +512,161 @@ class G474:
             self.last_log = now
             self.log_line()
 
-    def log_line(self):
+    def head(self):
+        """10 channels of the selected motor"""
         c = self.ch[self.sel]
         m = c.motors[0]
         diag = 1 if (c.en and not c.no_vm) else 0
-        head = "en:%d,duty:%d,out:%.1f,i_mA:%d,flt:%d,diag:%d,pos:%d,tgt:%d,vel:%d,mode:%d" % (
+        return "en:%d,duty:%d,out:%.1f,i_mA:%d,flt:%d,diag:%d,pos:%d,tgt:%d,vel:%d,mode:%d" % (
             c.en, c.duty, m.out, m.i_rep, c.flt, diag, m.pos, m.tgt if c.mode == 1 else 0, m.speed, c.mode)
-        tail = []
+
+    def tail(self):
+        """qN,tN,iN of the 3 joints"""
+        t = []
         for key, ch in zip(self.keys, self.ch):
             n = APP_ORDER.index(key) + 1
             mm = ch.motors[0]
-            tail.append("q%d:%d,t%d:%d,i%d:%d" % (n, mm.pos, n, mm.tgt if ch.mode == 1 else mm.pos, n, mm.i_rep))
-        self.write(head + "," + ",".join(tail))
+            t.append("q%d:%d,t%d:%d,i%d:%d" % (n, mm.pos, n, mm.tgt if ch.mode == 1 else mm.pos, n, mm.i_rep))
+        return ",".join(t)
+
+    def log_line(self):
+        self.write(self.head() + "," + self.tail())
+
+
+# MCB G474 fw 0.8: the MCU with USB bridges the other one over UART4
+
+SINGLE = ("o", "+", "-", "r", "0", "p", "t", "v", "k", "x", "H", "z", "j", "I", "a")
+
+
+class G474Bridge(G474):
+    def __init__(self, mcu, write):
+        self.peer_name = "U7" if mcu == "U6" else "U6"
+        self.link_up = True
+        self.sel_remote = False
+        # the other MCU: everything it prints reaches USB as "[U7] ..."
+        self.peer = G474(self.peer_name, self._peer_write, banner=False)
+        self.peer.log_hz = 0
+        super().__init__(mcu, write)
+
+    def _peer_write(self, s):
+        if self.link_up:
+            self.write("[%s] %s" % (self.peer_name, s))
+
+    def all_keys(self):
+        return self.keys + (self.peer.keys if self.link_up else [])
+
+    def id_line(self):
+        if self.sel_remote and self.link_up:
+            p = self.peer
+            cnt90, motor = p.ch[p.sel].cnt90, "%d(%s)" % (p.sel + 1, p.keys[p.sel])
+        else:
+            cnt90, motor = self.ch[self.sel].cnt90, "%d(%s)" % (self.sel + 1, self.keys[self.sel])
+        return "ID: CyberHand-G474 fw 0.8-g474 joints=%d cnt90=%d mcu=%s motor=%s keys=%s link=%s" % (
+            len(self.all_keys()), cnt90, self.mcu, motor, ",".join(self.all_keys()),
+            self.peer_name if self.link_up else "-")
+
+    def set_link(self, up):
+        if up == self.link_up:
+            return self.ok("link %s %s" % (self.peer_name, "up" if up else "lost"))
+        self.link_up = up
+        if not up:
+            # slave watchdog: motors off, flt LINK (0x100)
+            for ch in self.peer.ch:
+                ch.en = 0
+                ch.mode = 0
+                ch.duty = 0
+                ch.flt |= 0x100
+            self.sel_remote = False
+        self.write(self.id_line())
+        self.write("LINK: %s %s" % ("up" if up else "lost", self.peer_name))
+
+    def owner(self, key):
+        """'L' local, 'R' remote (link up), None unknown / unreachable"""
+        if key in self.keys:
+            return "L"
+        if key in self.peer.keys:
+            return "R" if self.link_up else None
+        return None
+
+    def command(self, line):
+        parts = line.split()
+        c, args = parts[0], parts[1:]
+        if c.startswith("@"):
+            if c[1:].upper() != self.peer_name or not args:
+                return self.err("@%s <line>" % self.peer_name)
+            if not self.link_up:
+                return self.err("link %s down" % self.peer_name)
+            return self.peer.command(" ".join(args))
+        if c == "link":
+            if not args:
+                return self.ok("link %s %s" % (self.peer_name, "up" if self.link_up else "lost"))
+            return self.set_link(args[0] in ("on", "auto", "up"))
+        if c == "m" and args:
+            key = args[0].upper()
+            o = self.owner(key)
+            if o == "R":
+                self.sel_remote = True
+                return self.peer.command("m " + key)
+            if o is None and key in self.peer.keys:
+                return self.err("m %s: link %s down" % (key, self.peer_name))
+            self.sel_remote = False
+            return G474.command(self, line)
+        if c == "g" and len(args) >= 2:
+            k, known = self.joint_of(args[0])
+            if not known:
+                return self.err("g <joint 1-6|key> <deg>")
+            if k is not None:
+                return self.goto(k, args[1])
+            key = APP_ORDER[int(args[0]) - 1] if args[0].isdigit() else args[0].upper()
+            if self.owner(key) == "R":
+                return self.peer.command(line)
+            return self.err("g %s: link %s down" % (args[0], self.peer_name))
+        if c in ("e", "d", "c") and args:
+            o = self.owner(args[0].upper())
+            if o == "R":
+                return self.peer.command(line)
+            return G474.command(self, line)
+        if c in ("e", "d", "c", "D") and not args:
+            G474.command(self, line)
+            if self.link_up:
+                self.peer.command(line)
+            return
+        if c == "G":
+            vals = args
+            if len(vals) != 6:
+                return self.err("G q1..q6")
+            for n, v in enumerate(vals):
+                key = APP_ORDER[n]
+                o = self.owner(key)
+                if o == "L":
+                    self._mute = True
+                    self.ch[self.keys.index(key)].command("g %s" % v)
+                    self._mute = False
+                elif o == "R":
+                    self.peer._mute = True
+                    self.peer.ch[self.peer.keys.index(key)].command("g %s" % v)
+                    self.peer._mute = False
+            return self.ok("G")
+        if c == "h":
+            G474.command(self, line)
+            self.write("  @%s <line>     raw line to %s;  link on|off|auto" % (self.peer_name, self.peer_name))
+            return
+        if (c in SINGLE or (c == "g" and len(args) == 1)) and self.sel_remote:
+            if not self.link_up:
+                return self.err("link %s down" % self.peer_name)
+            return self.peer.command(line)
+        return G474.command(self, line)
+
+    def step(self, dt):
+        self.peer.step(dt)
+        G474.step(self, dt)
+
+    def log_line(self):
+        head = self.peer.head() if (self.sel_remote and self.link_up) else self.head()
+        tail = self.tail()
+        if self.link_up:
+            tail += "," + self.peer.tail()
+        self.write("%s,%s,lk:%d" % (head, tail, 1 if self.link_up else 0))
 
 
 HELP_G474 = """
@@ -559,6 +707,7 @@ def main():
     ap.add_argument("--link", help="also create a symlink to the pty at this path")
     ap.add_argument("--no-vm", action="store_true", help="simulate missing motor supply: no motion, no current, DIAG low")
     ap.add_argument("--g474", choices=["U6", "U7"], help="emulate one MCU of the MCB G474 board (3 motors)")
+    ap.add_argument("--bridge", action="store_true", help="with --g474: fw 0.8, also drive the other MCU over the UART link")
     a = ap.parse_args()
 
     if a.port:
@@ -595,7 +744,10 @@ def main():
                 pass
 
     writer = lambda s: write_raw((s + "\r\n").encode())
-    fw = G474(a.g474, writer) if a.g474 else Firmware(a.joints, writer)
+    if a.g474:
+        fw = G474Bridge(a.g474, writer) if a.bridge else G474(a.g474, writer)
+    else:
+        fw = Firmware(a.joints, writer)
     fw.no_vm = a.no_vm
     last = time.time()
     while True:

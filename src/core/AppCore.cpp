@@ -11,16 +11,20 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QQmlEngine>
+#include <QRegularExpression>
 #include <QStandardPaths>
 
 AppCore::AppCore(const QString &configDir, QObject *parent)
     : QObject(parent)
 {
     m_link = new SerialLink(this);
+    m_link2 = new SerialLink(this);
+    m_link2->setAutoSelect(false);
     m_console = new ConsoleModel(this);
     m_hand = new HandModel(this);
     m_telemetry = new Telemetry(m_hand, this);
     m_ctrl = new HandController(m_link, m_console, m_hand, this);
+    m_ctrl->addLink(m_link2);
     m_live = new LiveSeries(this);
     m_streamSeries = new LiveSeries(this);
     m_streamSeries->setCapacity(6000);
@@ -44,30 +48,41 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_config->setCollector([this]() { return collect(); });
     m_config->setApplier([this](const QJsonObject &o) { apply(o); });
 
-    // serial -> parser -> telemetry / console
-    connect(m_link, &SerialLink::lineReceived, this, &AppCore::onLine);
-    connect(m_link, &SerialLink::lineSent, m_console, &ConsoleModel::onSent);
-    m_idTimer.setSingleShot(true);
-    m_idTimer.setInterval(500);
-    connect(&m_idTimer, &QTimer::timeout, this, [this]() {
-        if (m_link->connected() && m_telemetry->firmwareId().isEmpty())
-            m_ctrl->requestId();
-    });
-    connect(m_link, &SerialLink::connectedChanged, this, [this]() {
-        m_telemetry->reset();
-        if (m_fwConfigurable) {
-            m_fwConfigurable = false;
-            emit firmwareConfigurableChanged();
+    // serial -> parser -> telemetry / console (port 1 and port 2)
+    for (int i = 0; i < 2; ++i) {
+        SerialLink *l = i ? m_link2 : m_link;
+        connect(l, &SerialLink::lineReceived, this, [this, i](const QString &line, double) { onLine(i, line); });
+        connect(l, &SerialLink::lineSent, this, [this, i](const QString &line, bool quiet) {
+            m_console->onSent(line, quiet, txTag(i));
+        });
+        connect(l, &SerialLink::connectedChanged, this, [this, i]() { onPortConnection(i); });
+        connect(l, &SerialLink::errorStringChanged, this, [this, l]() {
+            if (!l->errorString().isEmpty())
+                m_console->error(m_ctrl->openPorts() > 0 || m_ctrl->dualPort()
+                                     ? QStringLiteral("%1: %2").arg(l->portName(), l->errorString())
+                                     : l->errorString());
+        });
+        m_idTimer[i].setSingleShot(true);
+        m_idTimer[i].setInterval(500);
+        connect(&m_idTimer[i], &QTimer::timeout, this, [this, i]() {
+            // ask the firmware who it is (cnt90, joints, keys)
+            if (m_ctrl->portOpen(i) && !m_gotId[i])
+                m_ctrl->sendTo(i, QStringLiteral("i"));
+        });
+    }
+    // port 2 follows the serial settings of port 1
+    connect(m_link, &SerialLink::baudRateChanged, this, [this]() { m_link2->setBaudRate(m_link->baudRate()); });
+    connect(m_link, &SerialLink::lineEndingChanged, this, [this]() { m_link2->setLineEnding(m_link->lineEnding()); });
+    connect(m_ctrl, &HandController::dualPortChanged, this, [this]() {
+        // 2-port mode: suggest a free port for port 2
+        if (m_ctrl->dualPort() && m_link2->portName().isEmpty()) {
+            m_link2->refreshPorts();
+            for (const QString &n : m_link2->ports())
+                if (n != m_link->portName()) {
+                    m_link2->setPortName(n);
+                    break;
+                }
         }
-        m_fwSynced = false;
-        if (m_link->connected()) {
-            m_live->clear();
-            m_console->info(tr("Đã kết nối %1 @ %2").arg(m_link->portName()).arg(m_link->baudRate()));
-            m_idTimer.start(); // ask the firmware who it is (cnt90, joints)
-        } else {
-            m_console->info(tr("Đã ngắt kết nối"));
-        }
-        emit runStateChanged();
     });
     connect(m_telemetry, &Telemetry::updated, this, &AppCore::runStateChanged);
     connect(m_player, &Player::playingChanged, this, &AppCore::runStateChanged);
@@ -78,9 +93,9 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     connect(m_telemetry, &Telemetry::sample, m_live, &LiveSeries::addSample);
     connect(m_telemetry, &Telemetry::overCurrent, this, &AppCore::onOverCurrent);
     connect(m_telemetry, &Telemetry::configFromFirmware, this, &AppCore::onFirmwareId);
-    // G474: the main joint picks the motor of the single-motor commands
+    // G474: the main joint picks the motor (and port) of the single-motor commands
     connect(m_hand, &HandModel::benchJointChanged, this, [this]() {
-        if (m_link->connected() && !m_ctrl->portKeys().isEmpty())
+        if (m_ctrl->connected() && m_ctrl->layoutKnown())
             m_ctrl->selectBenchMotor();
     });
 
@@ -175,16 +190,189 @@ void AppCore::registerQmlTypes()
     qmlRegisterType<CadGeometry>(uri, 1, 0, "CadGeometry");
 }
 
-void AppCore::onLine(const QString &line, double t)
+QString AppCore::rxTag(int port) const
 {
-    const ParsedLine p = LineParser::parse(line);
-    if (p.telemetry) {
-        m_telemetry->processTelemetry(t, p.names, p.values);
-        m_console->onTelemetryLine(line);
+    // tag lines only when two MCUs talk: 2 ports, or a port bridging the other MCU
+    return (m_ctrl->openPorts() > 1 || m_ctrl->portHasPeer(port)) ? m_ctrl->portLabel(port) : QString();
+}
+
+QString AppCore::txTag(int port) const
+{
+    return m_ctrl->openPorts() > 1 ? m_ctrl->portLabel(port) : QString();
+}
+
+void AppCore::onPortConnection(int port)
+{
+    SerialLink *l = port ? m_link2 : m_link;
+    m_gotId[port] = false;
+    m_synced[port].clear();
+    m_portLog[port] = PortLog();
+    if (l->connected()) {
+        if (m_ctrl->openPorts() == 1) {
+            // first port of a session: fresh state, common time base for both ports
+            m_telemetry->reset();
+            m_live->clear();
+            m_rxClock.start();
+        }
+        m_console->info(tr("Đã kết nối %1 @ %2").arg(l->portName()).arg(l->baudRate()));
+        m_idTimer[port].start();
     } else {
-        m_console->onRx(line);
-        m_telemetry->processText(line);
+        m_idTimer[port].stop();
+        m_console->info(tr("Đã ngắt %1").arg(l->portName()));
+        if (!m_ctrl->connected())
+            m_telemetry->reset();
+        else
+            clearUnreachableFeedback();
     }
+    if (!m_ctrl->connected() && m_fwConfigurable) {
+        m_fwConfigurable = false;
+        emit firmwareConfigurableChanged();
+    }
+    emit runStateChanged();
+}
+
+bool AppCore::toggleConnection()
+{
+    if (m_ctrl->connected()) {
+        m_link->close();
+        m_link2->close();
+        return false;
+    }
+    bool ok = m_link->open();
+    if (m_ctrl->dualPort()) {
+        if (m_link2->portName().isEmpty()) {
+            m_console->error(tr("Chế độ 2 cổng: chưa chọn cổng 2"));
+            ok = false;
+        } else if (m_link2->portName() == m_link->portName()) {
+            m_console->error(tr("Cổng 2 trùng cổng 1 (%1)").arg(m_link->portName()));
+            ok = false;
+        } else {
+            ok = m_link2->open() && ok;
+        }
+    }
+    return ok;
+}
+
+void AppCore::clearUnreachableFeedback()
+{
+    if (!m_ctrl->layoutKnown())
+        return;
+    for (int i = 0; i < m_hand->count(); ++i)
+        if (m_ctrl->portOfJoint(i) < 0)
+            m_hand->joint(i)->clearFeedback();
+}
+
+void AppCore::onLine(int port, const QString &line)
+{
+    const double t = m_rxClock.isValid() ? m_rxClock.nsecsElapsed() / 1e9 : 0.0;
+    QString text = line;
+    QString src = rxTag(port);
+    // fw 0.8 bridge: text of the other MCU arrives as "[U7] ..."
+    static const QRegularExpression rePeer(QStringLiteral("^\\[(U\\d+)\\]\\s?"));
+    const auto mp = rePeer.match(line);
+    const bool peerLine = mp.hasMatch();
+    if (peerLine) {
+        src = mp.captured(1);
+        text = line.mid(mp.capturedLength());
+    }
+    const ParsedLine p = LineParser::parse(text);
+    if (p.telemetry) {
+        if (peerLine) {
+            // status line of the other MCU (@U7 s): shown, not mixed into the hand state
+            m_console->onRx(text, src);
+            return;
+        }
+        onTelemetryLine(port, t, p.names, p.values);
+        m_console->onTelemetryLine(text, src);
+        return;
+    }
+    m_console->onRx(text, src);
+    if (peerLine && text.startsWith(QLatin1String("ID:"), Qt::CaseInsensitive))
+        return; // the other MCU's own ID does not describe this port
+    static const QRegularExpression reLink(QStringLiteral("^LINK:\\s*(\\w+)\\s*(U\\d+)?"), QRegularExpression::CaseInsensitiveOption);
+    const auto ml = reLink.match(text);
+    if (ml.hasMatch() && !peerLine) {
+        onLinkLine(port, ml.captured(1).toLower(), ml.captured(2).toUpper(), text);
+        return;
+    }
+    m_rxPort = port;
+    m_telemetry->processText(text);
+}
+
+void AppCore::onLinkLine(int port, const QString &state, const QString &peer, const QString &text)
+{
+    const bool up = state == QLatin1String("up") || state == QLatin1String("ok") || state == QLatin1String("on");
+    if (m_ctrl->setPeerUp(port, up, peer))
+        reportPeer(port, up, text);
+}
+
+void AppCore::reportPeer(int port, bool up, const QString &text)
+{
+    const QString other = m_ctrl->ports().value(port).toMap().value(QStringLiteral("peer")).toString();
+    if (up) {
+        m_console->info(tr("Link %1-%2: up — cổng %1 điều khiển cả %2").arg(m_ctrl->portLabel(port), other));
+        return;
+    }
+    m_console->error(tr("Link %1-%2 mất — khớp của %2 tạm không điều khiển được").arg(m_ctrl->portLabel(port), other));
+    m_telemetry->noteEvent(QStringLiteral("LINK"), text);
+    clearUnreachableFeedback();
+}
+
+void AppCore::onTelemetryLine(int port, double t, const QStringList &names, const QVector<double> &values)
+{
+    // fw 0.8 bridge: lk = UART link to the other MCU up
+    const int lk = names.indexOf(QLatin1String("lk"));
+    if (lk >= 0 && lk < values.size() && m_ctrl->portHasPeer(port)) {
+        const bool up = values[lk] != 0;
+        if (m_ctrl->setPeerUp(port, up))
+            reportPeer(port, up, QStringLiteral("lk:%1").arg(up ? 1 : 0));
+    }
+    if (m_ctrl->openPorts() < 2) {
+        m_telemetry->processTelemetry(t, names, values);
+        return;
+    }
+    // 2 ports: keep each port's latest line; the port of the main joint publishes one
+    // merged sample (its 10 channels + qN/tN/iN of both, flt of both, the other port's
+    // channels as "U7.out" ...)
+    PortLog &own = m_portLog[port];
+    own.names = names;
+    own.values = values;
+    own.age.start();
+    auto fresh = [this](int p) { return m_portLog[p].age.isValid() && m_portLog[p].age.elapsed() < 1500; };
+    int clock = m_ctrl->portOfJoint(m_hand->benchJoint());
+    if (clock < 0 || !fresh(clock))
+        clock = port; // main port silent: any port drives the samples
+    if (port != clock)
+        return;
+    QStringList n = names;
+    QVector<double> v = values;
+    const int other = 1 - port;
+    if (fresh(other)) {
+        const PortLog &o = m_portLog[other];
+        const QString pre = m_ctrl->portLabel(other) + QLatin1Char('.');
+        for (int k = 0; k < o.names.size() && k < o.values.size(); ++k) {
+            const QString &name = o.names[k];
+            const bool jointField = name.size() == 2 && QStringLiteral("qti").contains(name[0]) && name[1].isDigit();
+            if (jointField) {
+                if (!n.contains(name)) {
+                    n << name;
+                    v << o.values[k];
+                }
+                continue;
+            }
+            if (name == QLatin1String("flt")) {
+                // a fault on either MCU is a hand fault
+                const int f = n.indexOf(QLatin1String("flt"));
+                if (f >= 0)
+                    v[f] = double(int(v[f]) | int(o.values[k]));
+            }
+            if (name != QLatin1String("lk")) {
+                n << pre + name;
+                v << o.values[k];
+            }
+        }
+    }
+    m_telemetry->processTelemetry(t, n, v);
 }
 
 void AppCore::setActiveMode(const QString &m)
@@ -238,7 +426,7 @@ void AppCore::setRefreshHz(double hz)
 
 QString AppCore::runState() const
 {
-    if (!m_link->connected())
+    if (!m_ctrl->connected())
         return QStringLiteral("OFFLINE");
     if (m_telemetry->flt() || m_telemetry->overLimit() || m_telemetry->diagLow())
         return QStringLiteral("FAULT");
@@ -253,19 +441,45 @@ QString AppCore::runState() const
 
 void AppCore::onFirmwareId(int joints, double cnt90)
 {
-    m_console->info(tr("Firmware: %1 khớp, %2 count/90°").arg(joints).arg(cnt90));
+    const int port = m_rxPort;
+    m_gotId[port] = true;
+    m_ctrl->setPortId(port, m_telemetry->firmwareId());
+    const QString who = m_ctrl->openPorts() > 1 ? (port ? m_link2 : m_link)->portName() + QStringLiteral(": ") : QString();
+    m_console->info(tr("%1Firmware: %2 khớp, %3 count/90°").arg(who).arg(joints).arg(cnt90));
     const bool g474 = m_telemetry->firmwareG474();
     const QStringList keys = m_telemetry->firmwareKeys();
     if (g474) {
-        // MCB G474: this port = one MCU with 3 motors
-        m_ctrl->setPortInfo(m_telemetry->firmwareMcu(), keys);
-        m_console->info(tr("Cổng %1: %2").arg(m_telemetry->firmwareMcu().isEmpty() ? tr("MCU") : m_telemetry->firmwareMcu(),
-                                             keys.join(QStringLiteral(", "))));
+        // MCB G474: this port = one MCU with 3 motors (fw 0.8 bridge: both MCUs)
+        const QString mcu = m_telemetry->firmwareMcu();
+        QString peer = m_telemetry->firmwareLink();
+        const bool linkDown = peer == QLatin1String("-");
+        if (linkDown) // bridge firmware, link down: the peer is the other MCU of the board
+            peer = mcu == QLatin1String("U6") ? QStringLiteral("U7") : (mcu == QLatin1String("U7") ? QStringLiteral("U6") : QString());
+        const int before = m_ctrl->peerState(port);
+        m_ctrl->setPortInfo(port, mcu, keys, peer);
+        const int after = m_ctrl->peerState(port);
+        QString msg = tr("Cổng %1: %2").arg(mcu.isEmpty() ? tr("MCU") : mcu, keys.join(QStringLiteral(", ")));
+        if (!peer.isEmpty())
+            msg += linkDown ? tr(" · link %1 mất").arg(peer) : tr(" · link %1").arg(peer);
+        m_console->info(msg);
+        if (after >= 0 && before >= 0 && after != before)
+            reportPeer(port, after == 1, m_telemetry->firmwareId());
+        const int other = m_ctrl->portOfMcu(mcu);
+        if (!mcu.isEmpty() && other >= 0 && other != port)
+            m_console->error(tr("Hai cổng cùng báo %1 — kiểm tra strap MCU_ID").arg(mcu));
+        clearUnreachableFeedback();
         if (m_ctrl->protocol() != HandController::PerJoint) {
             m_ctrl->setProtocol(HandController::PerJoint);
             m_console->info(tr("Firmware G474 → giao thức \"Từng khớp\""));
         }
-        m_ctrl->selectBenchMotor(); // m <main joint>, or "Khớp X nằm ở U7 — cắm cổng U7"
+        // m <main joint> on its port, or "Khớp X nằm ở U7 — ..." once every open port has answered
+        const int benchPort = m_ctrl->portOfJoint(m_hand->benchJoint());
+        bool allAnswered = true;
+        for (int i = 0; i < 2; ++i)
+            if (m_ctrl->portOpen(i) && !m_gotId[i])
+                allAnswered = false;
+        if (benchPort == port || (benchPort < 0 && allAnswered))
+            m_ctrl->selectBenchMotor();
     }
     if (cnt90 <= 0)
         return;
@@ -273,34 +487,48 @@ void AppCore::onFirmwareId(int joints, double cnt90)
         m_fwConfigurable = true;
         emit firmwareConfigurableChanged();
     }
-    if (m_fwSynced) // an `i` typed later does not push everything again
-        return;
-    m_fwSynced = true;
 
     if (g474) {
-        if (!m_calib->syncOnConnect())
+        // the app profile holds the calibration: every motor this port drives gets its j (and I),
+        // once per connection; joints that left the ID (bridge link lost: the other MCU may
+        // have restarted) are pushed again when they come back
+        QStringList kept;
+        for (const QString &k : m_synced[port])
+            if (keys.contains(k))
+                kept << k;
+        m_synced[port] = kept;
+        QStringList todo;
+        for (const QString &k : keys)
+            if (!m_synced[port].contains(k))
+                todo << k;
+        m_synced[port] << todo;
+        if (todo.isEmpty() || !m_calib->syncOnConnect())
             return;
-        // the app profile holds the calibration: every motor of this MCU gets its j (and I)
         static const int fw[] = {3, 0, 1, 2};
-        for (const QString &k : keys) {
+        for (const QString &k : todo) {
             const Joint *j = m_hand->joint(m_hand->indexOfKey(k));
             if (!j)
                 continue;
-            m_ctrl->send(QStringLiteral("m ") + k);
+            m_ctrl->sendTo(port, QStringLiteral("m ") + k);
             if (j->countsPer90() >= 1)
-                m_ctrl->send(QStringLiteral("j ") + LineParser::num(j->countsPer90(), 0));
+                m_ctrl->sendTo(port, QStringLiteral("j ") + LineParser::num(j->countsPer90(), 0));
             else
                 m_console->error(tr("%1: cnt/90° = %2 (âm) — không gửi j, sửa chiều motor/encoder trong firmware")
                                      .arg(k, LineParser::num(j->countsPer90(), 0)));
             if (m_telemetry->overSource() == Telemetry::Firmware)
-                m_ctrl->send(HandController::protectionCommand(j->currentLimitMa(), m_telemetry->tripMs(),
-                                                               fw[qBound(0, m_telemetry->overResponse(), 3)],
-                                                               m_telemetry->retractDeg()));
+                m_ctrl->sendTo(port, HandController::protectionCommand(j->currentLimitMa(), m_telemetry->tripMs(),
+                                                                       fw[qBound(0, m_telemetry->overResponse(), 3)],
+                                                                       m_telemetry->retractDeg()));
         }
-        m_ctrl->selectBenchMotor(false);
+        if (m_ctrl->portOfJoint(m_hand->benchJoint()) == port)
+            m_ctrl->selectBenchMotor(false);
         return;
     }
 
+    // single-joint bench (H562): once per connection
+    if (m_synced[port].contains(QStringLiteral("*")))
+        return;
+    m_synced[port] << QStringLiteral("*");
     Joint *j = m_hand->joint(m_hand->benchJoint());
     if (!j)
         return;
@@ -418,6 +646,14 @@ void AppCore::openPortAtStart(const QString &port, int baud)
     m_link->open();
 }
 
+void AppCore::openPort2AtStart(const QString &port)
+{
+    m_ctrl->setDualPort(true);
+    m_link2->setPortName(port);
+    m_link2->setBaudRate(m_link->baudRate());
+    m_link2->open();
+}
+
 void AppCore::runMacroText(const QString &text)
 {
     m_macros->runText(text, QStringLiteral("cli"));
@@ -442,7 +678,9 @@ QJsonObject AppCore::collect() const
     QJsonObject o;
     o.insert(QStringLiteral("link"), QJsonObject{{QStringLiteral("port"), m_link->portName()},
                                                   {QStringLiteral("baud"), m_link->baudRate()},
-                                                  {QStringLiteral("lineEnding"), m_link->lineEnding()}});
+                                                  {QStringLiteral("lineEnding"), m_link->lineEnding()},
+                                                  {QStringLiteral("dual"), m_ctrl->dualPort()},
+                                                  {QStringLiteral("port2"), m_link2->portName()}});
     o.insert(QStringLiteral("control"), QJsonObject{
         {QStringLiteral("protocol"), m_ctrl->protocol()},
         {QStringLiteral("deadband"), m_ctrl->deadband()},
@@ -489,12 +727,16 @@ QJsonObject AppCore::collect() const
 void AppCore::apply(const QJsonObject &o)
 {
     const QJsonObject link = o.value(QStringLiteral("link")).toObject();
-    if (!link.isEmpty() && !m_link->connected()) {
+    if (!link.isEmpty() && !m_ctrl->connected()) {
         const QString port = link.value(QStringLiteral("port")).toString();
         if (!port.isEmpty())
             m_link->setPortName(port);
         m_link->setBaudRate(link.value(QStringLiteral("baud")).toInt(115200));
         m_link->setLineEnding(link.value(QStringLiteral("lineEnding")).toInt(0));
+        const QString port2 = link.value(QStringLiteral("port2")).toString();
+        if (!port2.isEmpty())
+            m_link2->setPortName(port2);
+        m_ctrl->setDualPort(link.value(QStringLiteral("dual")).toBool(false));
     }
     const QJsonObject c = o.value(QStringLiteral("control")).toObject();
     if (!c.isEmpty()) {

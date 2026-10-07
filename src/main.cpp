@@ -49,6 +49,7 @@ int main(int argc, char *argv[])
     args.addHelpOption();
     args.addVersionOption();
     QCommandLineOption portOpt(QStringLiteral("port"), QStringLiteral("Open this serial port at start"), QStringLiteral("name"));
+    QCommandLineOption port2Opt(QStringLiteral("port2"), QStringLiteral("2-port mode: open this serial port as port 2"), QStringLiteral("name"));
     QCommandLineOption baudOpt(QStringLiteral("baud"), QStringLiteral("Baud rate"), QStringLiteral("rate"), QStringLiteral("115200"));
     QCommandLineOption configDirOpt(QStringLiteral("config-dir"), QStringLiteral("Folder for config profiles"), QStringLiteral("dir"));
     QCommandLineOption modeOpt(QStringLiteral("mode"), QStringLiteral("Start in this mode (live, text, timeline, controller, stream, console)"), QStringLiteral("mode"));
@@ -57,7 +58,7 @@ int main(int argc, char *argv[])
     QCommandLineOption scriptOpt(QStringLiteral("run-macro"), QStringLiteral("Run this macro text at start (lines separated by ;)"), QStringLiteral("text"));
     QCommandLineOption playOpt(QStringLiteral("play"), QStringLiteral("Load a trajectory CSV and play it"), QStringLiteral("file"));
     QCommandLineOption evalOpt(QStringLiteral("eval"), QStringLiteral("Evaluate a QML/JS expression after start (repeatable), e.g. \"Core.stream.start()\""), QStringLiteral("js"));
-    args.addOptions({portOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt});
+    args.addOptions({portOpt, port2Opt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt});
     args.process(app);
 
     AppCore core(args.value(configDirOpt));
@@ -75,6 +76,8 @@ int main(int argc, char *argv[])
     if (args.isSet(portOpt)) {
         core.openPortAtStart(args.value(portOpt), args.value(baudOpt).toInt());
     }
+    if (args.isSet(port2Opt))
+        core.openPort2AtStart(args.value(port2Opt));
     if (args.isSet(scriptOpt)) {
         QString text = args.value(scriptOpt);
         text.replace(QLatin1Char(';'), QLatin1Char('\n'));

@@ -30,7 +30,15 @@ Cập nhật: 2026-09-27
 
 - Firmware MCB G474 (fw 0.7-g474): đọc `mcu=` / `keys=` trong ID, tự chọn "Từng khớp", `m <khớp chính>`,
   đẩy `j` (và `I`) cho từng motor của MCU, khóa lệnh 1 khớp khi khớp chính ở MCU kia, khớp MCU kia hiện "chưa kết nối".
-  fw_sim `--g474 U6|U7`. Chưa: mở 2 cổng cùng lúc.
+  fw_sim `--g474 U6|U7`.
+
+### 0.4.0 — 2 MCU
+
+- Chế độ 2 cổng (U6 + U7 cùng lúc): định tuyến lệnh theo khớp, gộp log thành 6 khớp, console gắn nguồn + lọc + chọn đích,
+  `@U7 <lệnh>`, đồng bộ `j`/`I` từng cổng, cổng 2 lưu trong profile, tùy chọn dòng lệnh `--port2`.
+- Chế độ 1 cổng qua link UART (fw 0.8-g474): ID `keys=` 6 khớp + `link=U7`, bỏ tiền tố `[U7] `, `LINK: up/lost`, `lk`,
+  flt 0x100 = LINK (chip LINK), khớp MCU kia khóa khi mất link và được đồng bộ lại khi link lên.
+- fw_sim `--g474 U6 --bridge` (lệnh `link on|off`). Macro cho phép dòng `@U7 ...`.
 
 ## Giả định cần Duc xác nhận
 

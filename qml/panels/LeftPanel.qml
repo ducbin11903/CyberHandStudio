@@ -11,6 +11,82 @@ Card {
     property var hand: Core.hand
     readonly property var bench: hand.joints[hand.benchJoint]
 
+    // serial port picker bound to one SerialLink (port 1 / port 2)
+    component PortCombo: FlatCombo {
+        id: pc
+        property var link
+        Layout.fillWidth: true
+        editable: true
+        model: pc.link.ports
+        enabled: !pc.link.connected
+        Component.onCompleted: editText = pc.link.portName
+        Connections {
+            target: pc.link
+            function onPortNameChanged() { if (pc.editText !== pc.link.portName) pc.editText = pc.link.portName }
+        }
+        onActivated: (i) => pc.link.portName = textAt(i)
+        onAccepted: pc.link.portName = editText
+        onEditTextChanged: if (!pc.link.connected && editText.length) pc.link.portName = editText
+    }
+
+    // one port: LED, MCU, RX rate / error, then joints, selected motor and UART link state
+    component PortStatus: ColumnLayout {
+        id: ps
+        property int port: 0
+        readonly property var link: port === 0 ? Core.link : Core.link2
+        readonly property var info: Core.ctrl.ports[port] || ({})
+        readonly property var keys: info.keys || []
+        readonly property bool peerLost: (info.peer || "").length > 0 && info.peerUp === 0
+        Layout.fillWidth: true
+        spacing: 1
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 6
+            Led { on: ps.link.connected && ps.link.lastLineAgeMs >= 0 && ps.link.lastLineAgeMs < 1500 }
+            TextLabel {
+                visible: text.length > 0
+                text: (ps.info.mcu || "").length ? ps.info.mcu : (Core.ctrl.dualPort ? qsTr("Cổng %1").arg(ps.port + 1) : "")
+                color: Theme.mcuColor(ps.info.mcu)
+                font.bold: true
+                font.pixelSize: Theme.fontSmall
+            }
+            TextLabel {
+                Layout.fillWidth: true
+                secondary: true
+                font.pixelSize: Theme.fontSmall
+                color: ps.link.errorString.length && !ps.link.connected ? Theme.liveRed : Theme.textSecondary
+                text: {
+                    if (!ps.link.connected)
+                        return ps.link.errorString.length ? ps.link.errorString : qsTr("Chưa kết nối")
+                    var age = ps.link.lastLineAgeMs
+                    return (Core.ctrl.openPorts > 1 ? ps.link.portName + " · " : "")
+                        + qsTr("RX %1 B/s · %2 dòng/s · dòng cuối %3")
+                        .arg(Math.round(ps.link.rxBytesPerSec))
+                        .arg(ps.link.linesPerSec.toFixed(1))
+                        .arg(age < 0 ? "—" : (age > 9999 ? ">10 s" : age + " ms"))
+                }
+            }
+        }
+        TextLabel {
+            Layout.fillWidth: true
+            Layout.leftMargin: 15
+            visible: ps.link.connected && (ps.keys.length > 0 || (ps.info.peer || "").length > 0 || (ps.info.id || "").length === 0)
+            font.pixelSize: Theme.fontSmall
+            wrapMode: Text.WordWrap
+            elide: Text.ElideNone
+            color: ps.peerLost ? Theme.liveRed : Theme.textSecondary
+            text: {
+                if ((ps.info.id || "").length === 0 && ps.keys.length === 0)
+                    return qsTr("chờ ID…")
+                var t = ""
+                if ((ps.info.peer || "").length)
+                    t += (ps.peerLost ? qsTr("link %1 MẤT") : qsTr("link ⇄ %1")).arg(ps.info.peer) + " · "
+                t += qsTr("khớp %1 · motor %2").arg(ps.keys.join(", ")).arg((ps.info.selected || "").length ? ps.info.selected : "—")
+                return t
+            }
+        }
+    }
+
     TextPrompt { id: prompt }
     FolderDialog {
         id: cadDialog
@@ -66,10 +142,10 @@ Card {
             Item { Layout.preferredWidth: 4 }
             FlatButton {
                 Layout.preferredWidth: 104
-                accent: !Core.link.connected
-                text: Core.link.connected ? qsTr("Disconnect") : qsTr("Connect")
+                accent: !Core.ctrl.connected
+                text: Core.ctrl.connected ? qsTr("Disconnect") : qsTr("Connect")
                 iconPath: Icons.plug
-                onClicked: Core.link.toggle()
+                onClicked: Core.toggleConnection()
             }
         }
 
@@ -91,23 +167,26 @@ Card {
                 Section {
                     title: qsTr("Communication")
                     FormRow {
-                        label: qsTr("COM Port")
-                        FlatCombo {
-                            id: portCombo
-                            Layout.fillWidth: true
-                            editable: true
-                            model: Core.link.ports
-                            enabled: !Core.link.connected
-                            Component.onCompleted: editText = Core.link.portName
-                            Connections {
-                                target: Core.link
-                                function onPortNameChanged() { if (portCombo.editText !== Core.link.portName) portCombo.editText = Core.link.portName }
-                            }
-                            onActivated: (i) => Core.link.portName = textAt(i)
-                            onAccepted: Core.link.portName = editText
-                            onEditTextChanged: if (!Core.link.connected && editText.length) Core.link.portName = editText
+                        label: qsTr("Kết nối")
+                        SegmentToggle {
+                            options: [qsTr("1 cổng"), qsTr("2 cổng · U6 + U7")]
+                            currentIndex: Core.ctrl.dualPort ? 1 : 0
+                            enabled: !Core.ctrl.connected
+                            opacity: enabled ? 1 : 0.5
+                            onActivated: (i) => Core.ctrl.dualPort = (i === 1)
                         }
-                        IconButton { iconPath: Icons.refresh; tip: qsTr("Quét lại cổng"); onClicked: Core.link.refreshPorts() }
+                        Item { Layout.fillWidth: true }
+                    }
+                    FormRow {
+                        label: Core.ctrl.dualPort ? qsTr("Cổng 1") : qsTr("COM Port")
+                        PortCombo { link: Core.link }
+                        IconButton { iconPath: Icons.refresh; tip: qsTr("Quét lại cổng"); onClicked: { Core.link.refreshPorts(); Core.link2.refreshPorts() } }
+                    }
+                    FormRow {
+                        visible: Core.ctrl.dualPort
+                        label: qsTr("Cổng 2")
+                        PortCombo { link: Core.link2 }
+                        Item { implicitWidth: 24 }
                     }
                     FormRow {
                         label: qsTr("Baud")
@@ -156,35 +235,21 @@ Card {
                             onActivated: (i) => root.hand.benchJoint = i
                         }
                     }
+                    Repeater {
+                        model: Core.ctrl.dualPort ? 2 : 1
+                        PortStatus { port: index }
+                    }
                     TextLabel {
                         Layout.fillWidth: true
-                        visible: Core.ctrl.portKeys.length > 0
-                        font.pixelSize: Theme.fontSmall
-                        secondary: true
-                        text: qsTr("Cổng %1 · khớp %2 · motor đang chọn: %3")
-                              .arg(Core.ctrl.portMcu.length ? Core.ctrl.portMcu : "MCU")
-                              .arg(Core.ctrl.portKeys.join(", "))
-                              .arg(Core.ctrl.selectedKey.length ? Core.ctrl.selectedKey : "—")
-                    }
-                    RowLayout {
-                        Layout.fillWidth: true
-                        spacing: 6
-                        Led { on: Core.link.connected && Core.link.lastLineAgeMs >= 0 && Core.link.lastLineAgeMs < 1500 }
-                        TextLabel {
-                            Layout.fillWidth: true
-                            secondary: true
-                            font.pixelSize: Theme.fontSmall
-                            color: Core.link.errorString.length && !Core.link.connected ? Theme.liveRed : Theme.textSecondary
-                            text: {
-                                if (!Core.link.connected)
-                                    return Core.link.errorString.length ? Core.link.errorString : qsTr("Chưa kết nối")
-                                var age = Core.link.lastLineAgeMs
-                                return qsTr("RX %1 B/s · %2 dòng/s · dòng cuối %3")
-                                    .arg(Math.round(Core.link.rxBytesPerSec))
-                                    .arg(Core.link.linesPerSec.toFixed(1))
-                                    .arg(age < 0 ? "—" : (age > 9999 ? ">10 s" : age + " ms"))
-                            }
-                        }
+                        // one G474 port without the UART link: only 3 joints reachable
+                        visible: Core.ctrl.connected && Core.ctrl.layoutKnown && !Core.ctrl.dualPort
+                                 && Core.ctrl.portKeys.length < Core.hand.joints.length
+                                 && !(Core.ctrl.ports[0] && Core.ctrl.ports[0].peer.length > 0)
+                        text: qsTr("Chỉ %1 khớp: chọn \"2 cổng\" và cắm thêm cổng còn lại, hoặc nạp firmware có link UART (fw 0.8).").arg(Core.ctrl.portKeys.length)
+                        muted: true
+                        font.pixelSize: Theme.fontTiny
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
                     }
                 }
 

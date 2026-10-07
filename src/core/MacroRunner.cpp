@@ -5,6 +5,7 @@
 #include "PoseLibrary.h"
 
 #include <QJsonObject>
+#include <QRegularExpression>
 
 MacroRunner::MacroRunner(HandController *ctrl, ConsoleModel *console, PoseLibrary *poses, QObject *parent)
     : QAbstractListModel(parent), m_ctrl(ctrl), m_console(console), m_poses(poses)
@@ -151,7 +152,9 @@ void MacroRunner::next()
         if (line.isEmpty() || line.startsWith(QLatin1Char('#')))
             continue;
 
-        if (!line.startsWith(QLatin1Char('@'))) {
+        // "@U7 s" is a command for one MCU (fw 0.8 link / 2 ports), not a macro directive
+        static const QRegularExpression reMcu(QStringLiteral("^@U\\d+\\s"), QRegularExpression::CaseInsensitiveOption);
+        if (!line.startsWith(QLatin1Char('@')) || reMcu.match(line).hasMatch()) {
             if (!m_ctrl->send(line)) {
                 finish(tr("Lỗi ở dòng %1 (chưa kết nối?)").arg(lineNo + 1));
                 return;
