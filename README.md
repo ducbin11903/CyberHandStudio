@@ -28,7 +28,8 @@ Mọi thao tác quy về lệnh CLI hiện có của firmware (`e d x o g p t v 
 - Linux: `python3 tools/fw_sim.py` in ra `/dev/pts/N` → nhập vào ô COM Port → Connect.
 - Windows: cài com0com (cặp COM ảo), `python tools/fw_sim.py --port COM21` (cần `pip install pyserial`), app mở COM20.
 - Board MCB 2 MCU: `--g474 U6` và `--g474 U7` (2 tiến trình → app chế độ "2 cổng"), hoặc `--g474 U6 --bridge`
-  (fw 0.8, 1 cổng điều khiển cả 6 khớp qua link UART). Xem docs/PROTOCOL.md.
+  (fw 0.8, 1 cổng điều khiển cả 6 khớp qua link UART). Cảm biến bo mạch (fw 0.9): `--temp`, `--vbat`, lệnh
+  `simtemp <C>` / `simvbat <V>` / `simsht off|on`. Xem docs/PROTOCOL.md.
 - Stream: `python tools/stream_demo.py` rồi vào Stream → Start.
 
 ## Build

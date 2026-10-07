@@ -207,15 +207,45 @@ ToolWindow {
                             V { text: Math.round(modelData.peakMa) }
                         }
                     }
-                    Item { Layout.fillHeight: true }
-                    TextLabel {
+                    Item { Layout.fillHeight: true; Layout.minimumHeight: 6 }
+                    // event log: over-current reactions, LINK, OTEMP, VBAT (with time)
+                    RowLayout {
                         Layout.fillWidth: true
-                        visible: Core.telemetry.lastEventText.length > 0
-                        text: qsTr("Sự kiện dòng cuối: ") + Core.telemetry.lastEventText
-                        color: Theme.warnAmber
-                        wrapMode: Text.WordWrap
-                        elide: Text.ElideNone
-                        font.pixelSize: Theme.fontSmall
+                        TextLabel { text: qsTr("Event log"); secondary: true; font.pixelSize: Theme.fontSmall; Layout.fillWidth: true }
+                        TextLabel { text: Core.events.count; muted: true; font.pixelSize: Theme.fontTiny }
+                        IconButton { iconPath: Icons.trash; iconSize: 12; width: 20; height: 20; tip: qsTr("Xóa"); onClicked: Core.events.clear() }
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.divider }
+                    ListView {
+                        id: evList
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 96
+                        clip: true
+                        model: Core.events
+                        ScrollBar.vertical: FlatScrollBar {}
+                        onCountChanged: Qt.callLater(positionViewAtEnd)
+                        delegate: RowLayout {
+                            width: ListView.view.width
+                            height: 18
+                            spacing: 6
+                            TextLabel { text: model.time; muted: true; font.family: Theme.monoFamily; font.pixelSize: Theme.fontTiny }
+                            TextLabel {
+                                text: model.code
+                                Layout.preferredWidth: 44
+                                color: !model.alarm ? Theme.okGreen
+                                       : (["WARN", "RETR", "HOLD"].indexOf(model.code) >= 0 ? Theme.warnAmber : Theme.liveRed)
+                                font.pixelSize: Theme.fontTiny
+                                font.bold: true
+                            }
+                            TextLabel { Layout.fillWidth: true; text: model.text; font.pixelSize: Theme.fontSmall }
+                        }
+                        TextLabel {
+                            anchors.centerIn: parent
+                            visible: Core.events.count === 0
+                            text: qsTr("Chưa có sự kiện")
+                            muted: true
+                            font.pixelSize: Theme.fontSmall
+                        }
                     }
                 }
             }

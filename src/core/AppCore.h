@@ -6,10 +6,12 @@
 #include <QUrl>
 #include <QVariantMap>
 
+#include "BoardMonitor.h"
 #include "CadModel.h"
 #include "Calibration.h"
 #include "ConfigStore.h"
 #include "ConsoleModel.h"
+#include "EventLog.h"
 #include "GamepadInput.h"
 #include "HandController.h"
 #include "HandModel.h"
@@ -18,6 +20,7 @@
 #include "MacroRunner.h"
 #include "Player.h"
 #include "PoseLibrary.h"
+#include "Recorder.h"
 #include "SerialLink.h"
 #include "StreamServer.h"
 #include "Telemetry.h"
@@ -50,6 +53,10 @@ class AppCore : public QObject
     Q_PROPERTY(ConfigStore *config READ config CONSTANT)
     Q_PROPERTY(Calibration *calibration READ calibration CONSTANT)
     Q_PROPERTY(CadModel *cad READ cad CONSTANT)
+    // MCB board sensors (fw 0.9): temperature, humidity, VBAT, protection state
+    Q_PROPERTY(BoardMonitor *board READ board CONSTANT)
+    Q_PROPERTY(EventLog *events READ events CONSTANT)
+    Q_PROPERTY(Recorder *recorder READ recorder CONSTANT)
     Q_PROPERTY(QString defaultCadFolder READ defaultCadFolder CONSTANT)
     Q_PROPERTY(double refreshHz READ refreshHz WRITE setRefreshHz NOTIFY refreshHzChanged)
     Q_PROPERTY(QString runState READ runState NOTIFY runStateChanged)
@@ -91,6 +98,9 @@ public:
     ConfigStore *config() const { return m_config; }
     Calibration *calibration() const { return m_calib; }
     CadModel *cad() const { return m_cad; }
+    BoardMonitor *board() const { return m_board; }
+    EventLog *events() const { return m_events; }
+    Recorder *recorder() const { return m_recorder; }
     // bundled model: <app>/models/opengrasp_lite (deployed) or the source tree (dev)
     QString defaultCadFolder() const;
     // load the model folder from Visual settings ("" = bundled); false keeps the block hand
@@ -162,6 +172,11 @@ private:
     ConfigStore *m_config;
     Calibration *m_calib;
     CadModel *m_cad;
+    BoardMonitor *m_board;
+    EventLog *m_events;
+    Recorder *m_recorder;
+    // per port: last log line that carried temp / rh / vbat (2 ports: U7 first)
+    QElapsedTimer m_boardSeen[2];
     double m_refreshHz = 30;
     bool m_fwConfigurable = false;
     QTimer m_idTimer[2];

@@ -37,8 +37,15 @@ Cập nhật: 2026-09-27
 - Chế độ 2 cổng (U6 + U7 cùng lúc): định tuyến lệnh theo khớp, gộp log thành 6 khớp, console gắn nguồn + lọc + chọn đích,
   `@U7 <lệnh>`, đồng bộ `j`/`I` từng cổng, cổng 2 lưu trong profile, tùy chọn dòng lệnh `--port2`.
 - Chế độ 1 cổng qua link UART (fw 0.8-g474): ID `keys=` 6 khớp + `link=U7`, bỏ tiền tố `[U7] `, `LINK: up/lost`, `lk`,
-  flt 0x100 = LINK (chip LINK), khớp MCU kia khóa khi mất link và được đồng bộ lại khi link lên.
+  flt 8 = LINK (chip LINK), khớp MCU kia khóa khi mất link và được đồng bộ lại khi link lên.
 - fw_sim `--g474 U6 --bridge` (lệnh `link on|off`). Macro cho phép dòng `@U7 ...`.
+
+### 0.5.0 — cảm biến bo mạch (fw 0.9)
+
+- Ô Board (nhiệt độ, độ ẩm, VBAT, % pin LiPo, tuổi dữ liệu, sparkline 10 phút + vạch ngưỡng), màu cảnh báo / báo động.
+- Banner OTEMP / VBAT, khóa Enable kèm lý do, "Đã an toàn — bấm Enable để chạy lại"; `sense` sau ID và nút làm mới.
+- Bit flt mới: 4 ESTOP, 8 LINK, 16 OTEMP, 32 VBAT. Event log (Data Monitor). Trục Y phụ trong Live. Ghi CSV.
+- fw_sim: temp/rh/vbat, `sense`, OTEMP/VBAT, `simtemp/simvbat/simsht`, `--temp/--vbat`.
 
 ## Giả định cần Duc xác nhận
 

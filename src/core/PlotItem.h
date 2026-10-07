@@ -31,6 +31,9 @@ class PlotItem : public QQuickPaintedItem
     Q_PROPERTY(int xDivisions MEMBER m_xDiv WRITE setXDivisions NOTIFY styleChanged)
     Q_PROPERTY(int yDivisions MEMBER m_yDiv WRITE setYDivisions NOTIFY styleChanged)
     Q_PROPERTY(double lineWidth MEMBER m_lineWidth WRITE setLineWidth NOTIFY styleChanged)
+    // secondary Y axes on the right, each auto-scaled over its own channels:
+    // [{ channels: ["temp", "rh"], label: "°C · %RH", minSpan: 10 }, { channels: ["vbat"], label: "V", minSpan: 1 }]
+    Q_PROPERTY(QVariantList rightAxes READ rightAxes WRITE setRightAxes NOTIFY styleChanged)
     Q_PROPERTY(double plotLeft READ plotLeft NOTIFY layoutChanged)
     Q_PROPERTY(double plotTop READ plotTop NOTIFY layoutChanged)
     Q_PROPERTY(double plotWidth READ plotWidth NOTIFY layoutChanged)
@@ -75,6 +78,8 @@ public:
     void setXDivisions(int d) { m_xDiv = qMax(1, d); emit styleChanged(); scheduleUpdate(); }
     void setYDivisions(int d) { m_yDiv = qMax(1, d); emit styleChanged(); scheduleUpdate(); }
     void setLineWidth(double w) { m_lineWidth = w; emit styleChanged(); scheduleUpdate(); }
+    QVariantList rightAxes() const { return m_rightAxesVar; }
+    void setRightAxes(const QVariantList &a);
 
     double plotLeft() const { return m_left; }
     double plotTop() const { return m_top; }
@@ -100,6 +105,19 @@ private:
     void scheduleUpdate();
     void onSourceData();
     bool channelShown(int ch) const;
+    // -1 = left axis, else index into m_axes
+    int axisOf(int ch) const;
+    double yToPixelOn(int axis, double y) const;
+    void autoRange(int axis, double *lo, double *hi) const;
+
+    struct Axis {
+        QStringList channels;
+        QString label;
+        double minSpan = 1;
+        double lo = 0, hi = 1;
+    };
+    QVector<Axis> m_axes;
+    QVariantList m_rightAxesVar;
 
     QPointer<PlotSource> m_source;
     double m_xMin = 0, m_xMax = 10, m_yMin = 0, m_yMax = 100;

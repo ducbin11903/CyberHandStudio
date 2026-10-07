@@ -124,6 +124,67 @@ QColor PlotItem::channelColor(int ch) const
     return kFallback[((ch % n) + n) % n];
 }
 
+void PlotItem::setRightAxes(const QVariantList &a)
+{
+    m_rightAxesVar = a;
+    m_axes.clear();
+    for (const QVariant &v : a) {
+        const QVariantMap m = v.toMap();
+        Axis ax;
+        ax.channels = m.value(QStringLiteral("channels")).toStringList();
+        ax.label = m.value(QStringLiteral("label")).toString();
+        ax.minSpan = qMax(1e-6, m.value(QStringLiteral("minSpan"), 1.0).toDouble());
+        m_axes.append(ax);
+    }
+    m_right = 12 + 46 * m_axes.size();
+    emit styleChanged();
+    emit layoutChanged();
+    onSourceData();
+}
+
+int PlotItem::axisOf(int ch) const
+{
+    if (m_axes.isEmpty() || !m_source)
+        return -1;
+    const QString name = m_source->channelName(ch);
+    for (int i = 0; i < m_axes.size(); ++i)
+        if (m_axes[i].channels.contains(name))
+            return i;
+    return -1;
+}
+
+double PlotItem::yToPixelOn(int axis, double y) const
+{
+    if (axis < 0)
+        return yToPixel(y);
+    const Axis &a = m_axes[axis];
+    const double span = a.hi - a.lo;
+    if (span <= 0)
+        return m_top + plotHeight();
+    return m_top + plotHeight() - (y - a.lo) / span * plotHeight();
+}
+
+void PlotItem::autoRange(int axis, double *outLo, double *outHi) const
+{
+    double lo = qInf(), hi = -qInf();
+    for (int ch = 0; ch < m_source->channelCount(); ++ch) {
+        if (!channelShown(ch) || axisOf(ch) != axis)
+            continue;
+        const int n = m_source->pointCount(ch);
+        for (int i = m_source->lowerBound(ch, m_xMin); i < n; ++i) {
+            const QPointF p = m_source->point(ch, i);
+            if (p.x() > m_xMax)
+                break;
+            if (!std::isfinite(p.y()))
+                continue;
+            lo = qMin(lo, p.y());
+            hi = qMax(hi, p.y());
+        }
+    }
+    *outLo = lo;
+    *outHi = hi;
+}
+
 bool PlotItem::channelShown(int ch) const
 {
     if (!m_source)
@@ -174,21 +235,8 @@ void PlotItem::onSourceData()
         }
     }
     if (m_source && m_autoY) {
-        double lo = qInf(), hi = -qInf();
-        for (int ch = 0; ch < m_source->channelCount(); ++ch) {
-            if (!channelShown(ch))
-                continue;
-            const int n = m_source->pointCount(ch);
-            for (int i = m_source->lowerBound(ch, m_xMin); i < n; ++i) {
-                const QPointF p = m_source->point(ch, i);
-                if (p.x() > m_xMax)
-                    break;
-                if (!std::isfinite(p.y()))
-                    continue;
-                lo = qMin(lo, p.y());
-                hi = qMax(hi, p.y());
-            }
-        }
+        double lo, hi;
+        autoRange(-1, &lo, &hi);
         if (std::isfinite(lo) && std::isfinite(hi)) {
             if (hi - lo < 1e-9) {
                 lo -= 1;
@@ -200,6 +248,19 @@ void PlotItem::onSourceData()
                 m_yMax = hi + pad;
                 emit rangeChanged();
             }
+        }
+    }
+    // secondary axes always follow their data (at least minSpan, centred)
+    if (m_source) {
+        for (int a = 0; a < m_axes.size(); ++a) {
+            double lo, hi;
+            autoRange(a, &lo, &hi);
+            if (!std::isfinite(lo) || !std::isfinite(hi))
+                continue;
+            const double span = qMax(hi - lo, m_axes[a].minSpan);
+            const double mid = (lo + hi) / 2;
+            m_axes[a].lo = mid - span / 2 - span * 0.08;
+            m_axes[a].hi = mid + span / 2 + span * 0.08;
         }
     }
     scheduleUpdate();
@@ -306,6 +367,27 @@ void PlotItem::paint(QPainter *p)
         p->restore();
     }
 
+    // secondary axes: tick labels at the grid lines, axis label rotated
+    for (int a = 0; a < m_axes.size(); ++a) {
+        const Axis &ax = m_axes[a];
+        const double x0 = area.right() + 4 + a * 46;
+        QColor c = m_text;
+        if (m_source)
+            for (int ch = 0; ch < m_source->channelCount(); ++ch)
+                if (axisOf(ch) == a && channelShown(ch)) {
+                    c = channelColor(ch); // tint with the first channel on this axis
+                    break;
+                }
+        p->setPen(c);
+        for (int i = 0; i <= m_yDiv; ++i) {
+            const double y = ax.lo + (ax.hi - ax.lo) * i / m_yDiv;
+            const double py = std::round(yToPixelOn(a, y)) + 0.5;
+            p->drawText(QRectF(x0, py - 8, 32, 16), Qt::AlignLeft | Qt::AlignVCenter, fmtTick(y, (ax.hi - ax.lo) / m_yDiv));
+        }
+        // unit under its tick column (short: "°C", "V")
+        p->drawText(QRectF(x0, height() - 14, 44, 14), Qt::AlignLeft | Qt::AlignVCenter, ax.label);
+    }
+
     if (!m_source)
         return;
 
@@ -318,7 +400,11 @@ void PlotItem::paint(QPainter *p)
         if (n == 0)
             continue;
         int i0 = qMax(0, m_source->lowerBound(ch, m_xMin) - 1);
+        const int axis = axisOf(ch);
+        auto yPix = [this, axis](double y) { return yToPixelOn(axis, y); };
         QPen pen(channelColor(ch), m_lineWidth);
+        if (axis >= 0)
+            pen.setStyle(Qt::DashLine); // secondary-axis channels read apart from the joints
         pen.setJoinStyle(Qt::RoundJoin);
         pen.setCapStyle(Qt::RoundCap);
         p->setPen(pen);
@@ -334,7 +420,7 @@ void PlotItem::paint(QPainter *p)
                     penDown = false;
                     continue;
                 }
-                const QPointF px(xToPixel(d.x()), yToPixel(d.y()));
+                const QPointF px(xToPixel(d.x()), yPix(d.y()));
                 if (!penDown) {
                     path.moveTo(px);
                     penDown = true;
@@ -353,13 +439,13 @@ void PlotItem::paint(QPainter *p)
                     return;
                 const double px = area.left() + c + 0.5;
                 if (!penDown) {
-                    path.moveTo(px, yToPixel(cmax));
+                    path.moveTo(px, yPix(cmax));
                     penDown = true;
                 } else {
-                    path.lineTo(px, yToPixel(cmax));
+                    path.lineTo(px, yPix(cmax));
                 }
-                path.lineTo(px, yToPixel(cmin));
-                path.lineTo(px, yToPixel(clast));
+                path.lineTo(px, yPix(cmin));
+                path.lineTo(px, yPix(clast));
             };
             for (int i = i0; i < n; ++i) {
                 const QPointF d = m_source->point(ch, i);

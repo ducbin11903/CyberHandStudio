@@ -11,6 +11,9 @@ Button {
     property bool iconFilled: false
     property color textColor: accent ? Theme.textOnAccent : (danger ? Theme.liveRed : Theme.textPrimary)
     property string tip: ""
+    // non-empty: looks disabled, ignores clicks, the tooltip says why (a disabled button shows no tooltip)
+    property string lockReason: ""
+    readonly property bool locked: lockReason.length > 0
 
     implicitHeight: Theme.controlHeight
     implicitWidth: Math.max(implicitHeight, contentItem.implicitWidth + leftPadding + rightPadding)
@@ -21,9 +24,18 @@ Button {
     font.family: Theme.fontFamily
     font.pixelSize: Theme.fontSize
     focusPolicy: Qt.NoFocus
-    opacity: enabled ? 1 : 0.4
+    opacity: enabled && !locked ? 1 : 0.4
 
-    Tip { visible: control.tip.length > 0 && control.hovered; text: control.tip }
+    Tip { visible: control.tip.length > 0 && control.hovered && !control.locked; text: control.tip }
+    MouseArea {
+        id: lockArea
+        anchors.fill: parent
+        visible: control.locked
+        hoverEnabled: true
+        acceptedButtons: Qt.AllButtons
+        cursorShape: Qt.ForbiddenCursor
+    }
+    Tip { visible: control.locked && lockArea.containsMouse; text: control.lockReason }
 
     contentItem: Row {
         spacing: 6

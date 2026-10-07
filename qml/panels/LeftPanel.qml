@@ -369,6 +369,47 @@ Card {
                     }
                 }
 
+                // ---- Board (fw 0.9: SHT40 + VBAT on U7) ---------------------
+                Section {
+                    title: qsTr("Board")
+                    FormRow {
+                        label: qsTr("Pin LiPo")
+                        NumberField {
+                            Layout.preferredWidth: 70
+                            value: Core.board.cells; decimals: 0; from: 1; to: 6; unit: "S"
+                            onCommitted: (v) => Core.board.cells = Math.round(v)
+                        }
+                        TextLabel {
+                            Layout.fillWidth: true
+                            muted: true
+                            font.pixelSize: Theme.fontSmall
+                            text: qsTr("%1 V = 0 % · %2 V = 100 %").arg((Core.board.cells * 3.2).toFixed(1)).arg((Core.board.cells * 4.2).toFixed(1))
+                        }
+                    }
+                    FormRow {
+                        label: qsTr("Ngưỡng tắt")
+                        TextLabel {
+                            Layout.fillWidth: true
+                            font.pixelSize: Theme.fontSmall
+                            secondary: true
+                            wrapMode: Text.WordWrap
+                            elide: Text.ElideNone
+                            text: Core.board.thresholdsKnown
+                                  ? qsTr("T ≥ %1 °C (lại < %2) · VBAT < %3 V (lại ≥ %4)")
+                                    .arg(Core.board.tOff.toFixed(1)).arg(Core.board.tOn.toFixed(1))
+                                    .arg(Core.board.vOff.toFixed(2)).arg(Core.board.vOn.toFixed(2))
+                                  : qsTr("chưa có — firmware gửi khi trả lời sense")
+                        }
+                        FlatButton {
+                            text: qsTr("sense")
+                            iconPath: Icons.refresh
+                            tip: qsTr("Đọc lại cảm biến và ngưỡng từ firmware")
+                            enabled: Core.ctrl.connected
+                            onClicked: Core.board.refresh()
+                        }
+                    }
+                }
+
                 // ---- Motor (bench) ----------------------------------------
                 Section {
                     title: qsTr("Motor")
@@ -387,7 +428,7 @@ Card {
                         columnSpacing: 4
                         rowSpacing: 4
                         readonly property string allTip: Core.ctrl.portKeys.length ? qsTr(" (cả %1)").arg(Core.ctrl.portKeys.join(", ")) : ""
-                        FlatButton { Layout.fillWidth: true; text: qsTr("Enable"); iconPath: Icons.power; tip: "e" + parent.allTip; onClicked: Core.ctrl.enable() }
+                        FlatButton { Layout.fillWidth: true; text: qsTr("Enable"); iconPath: Icons.power; tip: "e" + parent.allTip; lockReason: Core.board.blockReason; onClicked: Core.ctrl.enable() }
                         FlatButton { Layout.fillWidth: true; text: qsTr("Disable"); danger: true; tip: "d" + parent.allTip; onClicked: Core.ctrl.disable() }
                         FlatButton { Layout.fillWidth: true; text: qsTr("Home"); iconPath: Icons.home; tip: "H [pct] [mA]"; enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.home() }
                         FlatButton { Layout.fillWidth: true; text: qsTr("Zero"); tip: "z"; enabled: Core.ctrl.benchOnPort; onClicked: Core.ctrl.zero() }

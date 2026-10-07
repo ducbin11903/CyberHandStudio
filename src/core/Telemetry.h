@@ -9,6 +9,7 @@ class HandModel;
 
 // Latest firmware state decoded from log lines.
 // Bench H562 log: en,duty,out,i_mA,flt,diag,pos,tgt,vel,mode (one joint).
+// flt bits (MCB fw 0.9): 1 DIAG, 2 OVERI, 4 ESTOP, 8 LINK, 16 OTEMP, 32 VBAT.
 // Proposed 6-joint log: q1..q6 (pos counts), t1..t6 (tgt counts), i1..i6 (mA), en, flt, mode.
 class Telemetry : public QObject
 {
@@ -99,6 +100,11 @@ public:
     QStringList firmwareKeys() const { return m_fwKeys; }
     bool firmwareG474() const { return m_fwG474; }
     QString firmwareLink() const { return m_fwLink; }
+    // "fw 0.9-g474" -> (0, 9); -1 unknown
+    int firmwareMajor() const { return m_fwMajor; }
+    int firmwareMinor() const { return m_fwMinor; }
+    // MCB G474 fw >= 0.9: board sensors (temp / rh / vbat, `sense`)
+    bool firmwareHasBoardSensors() const { return m_fwG474 && (m_fwMajor > 0 || m_fwMinor >= 9); }
     double peakMa() const { return m_peak; }
     double currentLimitMa() const;
     void setCurrentLimitMa(double l);
@@ -119,7 +125,8 @@ public:
     // "RETR" / "HOLD" / "TRIP" / "WARN" for 3 s after an over-current reaction
     QString recentEvent() const;
     QString lastEventText() const { return m_eventText; }
-    Q_INVOKABLE void noteEvent(const QString &code, const QString &text);
+    // alarm = something was switched off / refused (event log colour)
+    Q_INVOKABLE void noteEvent(const QString &code, const QString &text, bool alarm = true);
 
     Q_INVOKABLE void resetPeak();
     Q_INVOKABLE void reset();
@@ -138,6 +145,8 @@ signals:
     void firmwareIdChanged();
     void limitChanged();
     void eventChanged();
+    // every noteEvent (event log)
+    void eventNoted(const QString &code, const QString &text, bool alarm);
     // names/values after adding derived channels (deg), for the live plot
     void sample(double t, const QStringList &names, const QVector<double> &values);
     void overCurrent(int joint, double ma);
@@ -159,6 +168,7 @@ private:
     QString m_fwMcu;
     QStringList m_fwKeys;
     QString m_fwLink;
+    int m_fwMajor = -1, m_fwMinor = -1;
     bool m_fwG474 = false;
     double m_peak = 0;
     int m_response = Warn;

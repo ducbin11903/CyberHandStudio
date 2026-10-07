@@ -537,6 +537,13 @@ QVector<int> HandController::routeOf(QString &line) const
         const int p = portOfToken(t[1], true);
         return {p >= 0 ? p : mainPort()};
     }
+    // board sensors live on U7 (fw 0.9; sim* = fw_sim test commands)
+    static const QStringList board = {QStringLiteral("sense"), QStringLiteral("simtemp"), QStringLiteral("simvbat"),
+                                      QStringLiteral("simsht")};
+    if (board.contains(c)) {
+        const int p = portOfMcu(QStringLiteral("U7"));
+        return {p >= 0 ? p : mainPort()};
+    }
     static const QStringList both = {QStringLiteral("e"), QStringLiteral("d"), QStringLiteral("c"), QStringLiteral("D"),
                                      QStringLiteral("i"), QStringLiteral("l"), QStringLiteral("G")};
     if (both.contains(c))

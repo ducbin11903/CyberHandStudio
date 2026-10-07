@@ -13,6 +13,9 @@ Options: --joints 6 to emulate the proposed 6-joint log (q1..q6, t1..t6, i1..i6)
          U6 = I, T1, T2 and U7 = M, R, P (motor 1/2/3), commands m / e d c [key] / D,
          g <joint 1-6|key> <deg> (joints of the other MCU are ignored without a reply),
          log = 10 channels of the selected motor + qN/tN/iN for the 3 joints.
+         fw 0.9 board sensors (SHT40 + VBAT on U7): log temp/rh/vbat, `sense`, OTEMP / VBAT
+         protection (all motors off, flt 16 / 32, `e` refused); test commands simtemp <C>,
+         simvbat <V>, simsht off|on; start values --temp / --vbat.
          --g474 U6 --bridge: fw 0.8-g474 with the UART link, this MCU has the USB port and
          bridges the other one (keys = all 6, link=U7, text of U7 prefixed "[U7] ",
          @U7 <line> raw, `link on|off` to simulate losing the link, log + lk:1).
@@ -356,6 +359,109 @@ class Firmware:
 
 
 # ---------------------------------------------------------------------------
+# MCB fw 0.9: board sensors on U7 (SHT40 + VBAT divider), protection on every MCU
+
+T_OFF, T_ON, V_OFF, V_ON = 70.0, 60.0, 6.40, 6.80
+
+
+class BoardSensor:
+    def __init__(self, temp=25.0, vbat=7.99):
+        self.t_set = temp
+        self.rh_set = 45.0
+        self.v_set = vbat
+        self.sht = True
+        self.i2c_err = 0
+        self._err_s = 0.0
+        self.temp = temp
+        self.rh = self.rh_set
+        self.vbat = vbat
+        self.load_ma = 0.0
+
+    def step(self, dt):
+        self.temp = self.t_set + random.uniform(-0.05, 0.05)
+        self.rh = max(0.0, min(100.0, self.rh_set + random.uniform(-0.2, 0.2)))
+        if self.v_set >= 3.0:
+            sag = self.load_ma / 1000.0 * 0.15          # ~0.15 ohm pack + wiring
+            self.vbat = max(0.0, self.v_set - sag + random.uniform(-0.004, 0.004))
+        else:
+            self.vbat = self.v_set                      # < 3 V: no battery
+        if not self.sht:
+            self._err_s += dt
+            if self._err_s >= 1.0:
+                self._err_s = 0.0
+                self.i2c_err += 1
+
+    def fields(self):
+        f = []
+        if self.sht:
+            f += ["temp:%.1f" % self.temp, "rh:%.1f" % self.rh]
+        f.append("vbat:%.2f" % self.vbat)
+        return ",".join(f)
+
+
+class Protect:
+    """one MCU: its motors off on board over-temperature / low battery"""
+    def __init__(self, g):
+        self.g = g
+        self.hot = False
+        self.low = False
+        self.low_ms = 0.0
+
+    def step(self, dt, sensor):
+        if sensor is None:          # no data (link to U7 down)
+            return
+        if sensor.sht:
+            t = sensor.temp
+            if not self.hot and t >= T_OFF:
+                self.hot = True
+                self.trip(16)
+                self.g.write("OTEMP: board %.1f C >= %.1f C (SHT40 on U7), all motors off (flt 16)" % (t, T_OFF))
+            elif self.hot and t < T_ON:
+                self.hot = False
+                self.g.write("OTEMP: cleared (< %.1f C), send e to run again" % T_ON)
+        v = sensor.vbat
+        if v < 3.0:                 # no battery: not checked
+            self.low_ms = 0.0
+        elif not self.low:
+            if v < V_OFF:
+                self.low_ms += dt * 1000.0
+                if self.low_ms >= 2000.0:
+                    self.low = True
+                    self.trip(32)
+                    self.g.write("VBAT: battery %.2f V < %.2f V, all motors off (flt 32)" % (v, V_OFF))
+            else:
+                self.low_ms = 0.0
+        elif v >= V_ON:
+            self.low = False
+            self.low_ms = 0.0
+            self.g.write("VBAT: ok (%.2f V), send e to run again" % v)
+
+    def trip(self, bit):
+        for ch in self.g.ch:
+            ch.en = 0
+            ch.mode = 0
+            ch.duty = 0
+            ch.flt |= bit
+
+    def refusal(self):
+        if self.hot:
+            return "ERR board over-temperature, motors stay off ('sense')"
+        if self.low:
+            return "ERR board battery low, motors stay off ('sense')"
+        return None
+
+
+def sense_line(sensor, prot):
+    if sensor is None:
+        return "ERR no sensor data (SHT40 + VBAT are on U7, link to U7 is down)"
+    tv = ("T=%.1f C RH=%.1f %%" % (sensor.temp, sensor.rh)) if sensor.sht else "T=n/a C RH=n/a %"
+    s = "OK sense U7 %s VBAT=%.2f V | off at T>=%.1f C (on <%.1f) VBAT<%.2f V (on >=%.2f) | hot=%d low=%d i2c_err=%d" % (
+        tv, sensor.vbat, T_OFF, T_ON, V_OFF, V_ON, 1 if prot.hot else 0, 1 if prot.low else 0, sensor.i2c_err)
+    if not sensor.sht:
+        s += " (T invalid)"
+    return s
+
+
 # MCB G474: one MCU, 3 motors (fw 0.7-g474)
 
 G474_KEYS = {"U6": ["I", "T1", "T2"], "U7": ["M", "R", "P"]}
@@ -363,9 +469,14 @@ APP_ORDER = ["T2", "T1", "I", "M", "R", "P"]   # joint numbers 1..6 used by g <j
 
 
 class G474:
-    def __init__(self, mcu, write, banner=True):
+    VERSION = "0.9-g474"
+
+    def __init__(self, mcu, write, banner=True, sensor=None):
         self.write = write
         self.mcu = mcu
+        # the sensor is on U7; a standalone U6 (2-port sim) stands in for the values it gets over the link
+        self.sensor = sensor if sensor is not None else BoardSensor()
+        self.owns_sensor = True
         self.keys = G474_KEYS[mcu]
         self.sel = 0
         self.log_hz = 5.0
@@ -377,6 +488,7 @@ class G474:
             fw = Firmware(1, self._chan_write)
             fw.log_hz = 0
             self.ch.append(fw)
+        self.protect = Protect(self)
         self._mute = False
         if banner:
             self.write("USBX: OK")
@@ -396,8 +508,27 @@ class G474:
             self.write(s)
 
     def id_line(self):
-        return "ID: CyberHand-G474 fw 0.7-g474 joints=3 cnt90=%d mcu=%s motor=%d(%s) keys=%s" % (
-            self.ch[self.sel].cnt90, self.mcu, self.sel + 1, self.keys[self.sel], ",".join(self.keys))
+        return "ID: CyberHand-G474 fw %s joints=3 cnt90=%d mcu=%s motor=%d(%s) keys=%s" % (
+            self.VERSION, self.ch[self.sel].cnt90, self.mcu, self.sel + 1, self.keys[self.sel], ",".join(self.keys))
+
+    def board(self):
+        """sensor values this MCU has (None = none)"""
+        return self.sensor
+
+    def sim_board(self, c, args):
+        """simtemp <C> / simvbat <V> / simsht off|on (test commands)"""
+        b = self.sensor
+        try:
+            if c == "simtemp":
+                b.t_set = float(args[0])
+                return self.ok("simtemp %.1f C" % b.t_set)
+            if c == "simvbat":
+                b.v_set = float(args[0])
+                return self.ok("simvbat %.2f V" % b.v_set)
+            b.sht = args[0].lower() in ("on", "1")
+            return self.ok("simsht %s" % ("on" if b.sht else "off"))
+        except (IndexError, ValueError):
+            return self.err("%s <value>" % c)
 
     def ok(self, msg):
         self.write("OK " + msg)
@@ -484,11 +615,21 @@ class G474:
                 if k is None:
                     return self.err("%s %s: not on %s" % (c, args[0], self.mcu))
                 targets = [k]
+            if c == "e":
+                refuse = self.protect.refusal()
+                if refuse:
+                    return self.write(refuse)
             self._mute = True
             for k in targets:
                 self.ch[k].command(c)
+                if c == "e":
+                    self.ch[k].flt &= ~(16 | 32)
             self._mute = False
             self.ok("%s %s" % (c, self.keys[targets[0]] if args else "all"))
+        elif c == "sense":
+            self.write(sense_line(self.board(), self.protect))
+        elif c in ("simtemp", "simvbat", "simsht"):
+            self.sim_board(c, args)
         elif c == "D":
             self._mute = True
             for ch in self.ch:
@@ -507,6 +648,10 @@ class G474:
     def step(self, dt):
         for ch in self.ch:
             ch.step(dt)
+        if self.owns_sensor:
+            self.sensor.load_ma = sum(ch.motors[0].i_rep for ch in self.ch)
+            self.sensor.step(dt)
+        self.protect.step(dt, self.board())
         now = time.time()
         if self.log_hz > 0 and now - self.last_log >= 1.0 / self.log_hz:
             self.last_log = now
@@ -529,8 +674,12 @@ class G474:
             t.append("q%d:%d,t%d:%d,i%d:%d" % (n, mm.pos, n, mm.tgt if ch.mode == 1 else mm.pos, n, mm.i_rep))
         return ",".join(t)
 
+    def board_fields(self):
+        b = self.board()
+        return ("," + b.fields()) if b is not None else ""
+
     def log_line(self):
-        self.write(self.head() + "," + self.tail())
+        self.write(self.head() + "," + self.tail() + self.board_fields())
 
 
 # MCB G474 fw 0.8: the MCU with USB bridges the other one over UART4
@@ -539,14 +688,18 @@ SINGLE = ("o", "+", "-", "r", "0", "p", "t", "v", "k", "x", "H", "z", "j", "I", 
 
 
 class G474Bridge(G474):
-    def __init__(self, mcu, write):
+    def __init__(self, mcu, write, sensor=None):
         self.peer_name = "U7" if mcu == "U6" else "U6"
         self.link_up = True
         self.sel_remote = False
         # the other MCU: everything it prints reaches USB as "[U7] ..."
-        self.peer = G474(self.peer_name, self._peer_write, banner=False)
+        self.peer = G474(self.peer_name, self._peer_write, banner=False, sensor=sensor)
         self.peer.log_hz = 0
-        super().__init__(mcu, write)
+        super().__init__(mcu, write, sensor=self.peer.sensor)
+        self.owns_sensor = False   # U7 measures, this MCU gets the values over the link
+
+    def board(self):
+        return self.sensor if self.link_up else None
 
     def _peer_write(self, s):
         if self.link_up:
@@ -561,8 +714,8 @@ class G474Bridge(G474):
             cnt90, motor = p.ch[p.sel].cnt90, "%d(%s)" % (p.sel + 1, p.keys[p.sel])
         else:
             cnt90, motor = self.ch[self.sel].cnt90, "%d(%s)" % (self.sel + 1, self.keys[self.sel])
-        return "ID: CyberHand-G474 fw 0.8-g474 joints=%d cnt90=%d mcu=%s motor=%s keys=%s link=%s" % (
-            len(self.all_keys()), cnt90, self.mcu, motor, ",".join(self.all_keys()),
+        return "ID: CyberHand-G474 fw %s joints=%d cnt90=%d mcu=%s motor=%s keys=%s link=%s" % (
+            self.VERSION, len(self.all_keys()), cnt90, self.mcu, motor, ",".join(self.all_keys()),
             self.peer_name if self.link_up else "-")
 
     def set_link(self, up):
@@ -570,12 +723,12 @@ class G474Bridge(G474):
             return self.ok("link %s %s" % (self.peer_name, "up" if up else "lost"))
         self.link_up = up
         if not up:
-            # slave watchdog: motors off, flt LINK (0x100)
+            # slave watchdog: motors off, flt LINK (8)
             for ch in self.peer.ch:
                 ch.en = 0
                 ch.mode = 0
                 ch.duty = 0
-                ch.flt |= 0x100
+                ch.flt |= 8
             self.sel_remote = False
         self.write(self.id_line())
         self.write("LINK: %s %s" % ("up" if up else "lost", self.peer_name))
@@ -666,7 +819,7 @@ class G474Bridge(G474):
         tail = self.tail()
         if self.link_up:
             tail += "," + self.peer.tail()
-        self.write("%s,%s,lk:%d" % (head, tail, 1 if self.link_up else 0))
+        self.write("%s,%s%s,lk:%d" % (head, tail, self.board_fields(), 1 if self.link_up else 0))
 
 
 HELP_G474 = """
@@ -677,6 +830,8 @@ CyberHand G474 sim (fw 0.7-g474) — this MCU drives 3 joints, see keys= in the 
   e / d / c [key]   enable / disable / clear faults: all 3 motors, or one
   D              all motors off
   i  s  l <hz>  h   id line, status line, log rate, this help
+  sense          board sensors (SHT40 + VBAT on U7) and protection thresholds
+  simtemp <C>  simvbat <V>  simsht off|on   sim only: set the sensor values
 """
 
 
@@ -708,6 +863,8 @@ def main():
     ap.add_argument("--no-vm", action="store_true", help="simulate missing motor supply: no motion, no current, DIAG low")
     ap.add_argument("--g474", choices=["U6", "U7"], help="emulate one MCU of the MCB G474 board (3 motors)")
     ap.add_argument("--bridge", action="store_true", help="with --g474: fw 0.8, also drive the other MCU over the UART link")
+    ap.add_argument("--temp", type=float, default=25.0, help="with --g474: board temperature at start, C")
+    ap.add_argument("--vbat", type=float, default=7.99, help="with --g474: battery voltage at start, V (< 3 = no battery)")
     a = ap.parse_args()
 
     if a.port:
@@ -745,7 +902,8 @@ def main():
 
     writer = lambda s: write_raw((s + "\r\n").encode())
     if a.g474:
-        fw = G474Bridge(a.g474, writer) if a.bridge else G474(a.g474, writer)
+        sensor = BoardSensor(a.temp, a.vbat)
+        fw = G474Bridge(a.g474, writer, sensor=sensor) if a.bridge else G474(a.g474, writer, sensor=sensor)
     else:
         fw = Firmware(a.joints, writer)
     fw.no_vm = a.no_vm

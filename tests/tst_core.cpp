@@ -4,6 +4,9 @@
 #include <QtTest>
 
 #include "core/AppCore.h"
+#include "core/BoardMonitor.h"
+#include "core/EventLog.h"
+#include "core/Recorder.h"
 #include "core/CadModel.h"
 #include "core/Calibration.h"
 #include "core/ConsoleModel.h"
@@ -665,9 +668,9 @@ private slots:
         QCOMPARE(link->virtualSent(), L({"m M", "m M", "j 7000", "m R", "j 7000", "m P", "j 7000", "m M"}));
 
         // lk:0 in the log also drops the joints of U7
-        link->injectLine(QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:256,diag:1,pos:0,tgt:0,vel:0,mode:0,q1:0,q4:0,lk:0"));
+        link->injectLine(QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:8,diag:1,pos:0,tgt:0,vel:0,mode:0,q1:0,q4:0,lk:0"));
         QVERIFY(hand->joint(J("R"))->offPort());
-        QVERIFY(Telemetry::faultText(256).contains(QStringLiteral("LINK")));
+        QVERIFY(Telemetry::faultText(8).contains(QStringLiteral("LINK")));
     }
 
     void consoleSourceFilter()
@@ -685,6 +688,215 @@ private slots:
         QCOMPARE(con.rowCount(), 2);
         con.setSourceFilter(QString());
         QCOMPARE(con.rowCount(), 4);
+    }
+
+    void boardSenseParse()
+    {
+        BoardMonitor::Sense s;
+        QVERIFY(BoardMonitor::parseSense(QStringLiteral(
+            "OK sense U7 T=25.0 C RH=45.0 % VBAT=7.99 V | off at T>=70.0 C (on <60.0) VBAT<6.40 V (on >=6.80) | hot=0 low=0 i2c_err=0"), &s));
+        QCOMPARE(s.mcu, QStringLiteral("U7"));
+        QCOMPARE(s.t, 25.0);
+        QCOMPARE(s.rh, 45.0);
+        QCOMPARE(s.vbat, 7.99);
+        QCOMPARE(s.tOff, 70.0);
+        QCOMPARE(s.tOn, 60.0);
+        QCOMPARE(s.vOff, 6.40);
+        QCOMPARE(s.vOn, 6.80);
+        QCOMPARE(s.hot, 0);
+        QCOMPARE(s.low, 0);
+        QCOMPARE(s.i2cErr, 0);
+        QVERIFY(BoardMonitor::parseSense(QStringLiteral(
+            "OK sense U7 T=n/a C RH=n/a % VBAT=7.50 V | off at T>=65.0 C (on <55.0) VBAT<6.40 V (on >=6.80) | hot=0 low=1 i2c_err=7 (T invalid)"), &s));
+        QVERIFY(qIsNaN(s.t));
+        QVERIFY(qIsNaN(s.rh));
+        QCOMPARE(s.vbat, 7.5);
+        QCOMPARE(s.tOff, 65.0); // thresholds come from the firmware
+        QCOMPARE(s.low, 1);
+        QCOMPARE(s.i2cErr, 7);
+        QVERIFY(BoardMonitor::parseSense(QStringLiteral(
+            "OK sense U7 T=31.5 C RH=40.0 % VBAT=0.00 V | off at T>=70.0 C (on <60.0) VBAT<6.40 V (on >=6.80) | hot=0 low=0 i2c_err=0 (VBAT not measured)"), &s));
+        QCOMPARE(s.t, 31.5);
+        QVERIFY(qIsNaN(s.vbat));
+        QVERIFY(!BoardMonitor::parseSense(QStringLiteral("OK pos 1555 cnt T2"), &s));
+        // the event lines are text, not telemetry
+        QVERIFY(!LineParser::parse(QStringLiteral("VBAT: battery 6.31 V < 6.40 V, all motors off (flt 32)")).telemetry);
+        QVERIFY(!LineParser::parse(QStringLiteral("OTEMP: board 72.0 C >= 70.0 C (SHT40 on U7), all motors off (flt 16)")).telemetry);
+        // fault bits of fw 0.9
+        QCOMPARE(Telemetry::faultText(4), QStringLiteral("ESTOP"));
+        QCOMPARE(Telemetry::faultText(8), QStringLiteral("LINK"));
+        QVERIFY(Telemetry::faultText(16).contains(QStringLiteral("nhiệt")));
+        QVERIFY(Telemetry::faultText(32).contains(QStringLiteral("Pin")));
+        QCOMPARE(Telemetry::faultText(1 | 2).split(QStringLiteral(" · ")).size(), 2);
+        // 2S LiPo: 6.4 V = 0 %, 8.4 V = 100 %
+        QCOMPARE(BoardMonitor::lipoPercent(3.2), 0.0);
+        QCOMPARE(BoardMonitor::lipoPercent(4.2), 100.0);
+        QCOMPARE(BoardMonitor::lipoPercent(3.84), 50.0);
+        QVERIFY(BoardMonitor::lipoPercent(3.9) > BoardMonitor::lipoPercent(3.8));
+    }
+
+    void boardLogAndEvents()
+    {
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        SerialLink *link = core.link();
+        BoardMonitor *board = core.board();
+        HandController *ctrl = core.ctrl();
+        Telemetry *tel = core.telemetry();
+        core.hand()->setBenchJoint(core.hand()->indexOfKey(QStringLiteral("I")));
+        link->openVirtual();
+        link->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.9-g474 joints=6 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2,M,R,P link=U7"));
+        QVERIFY(board->supported());
+        QCOMPARE(link->virtualSent().last(), QStringLiteral("sense")); // after the calibration push
+        link->injectLine(QStringLiteral(
+            "[U7] OK sense U7 T=25.0 C RH=45.0 % VBAT=7.99 V | off at T>=70.0 C (on <60.0) VBAT<6.40 V (on >=6.80) | hot=0 low=0 i2c_err=0"));
+        QVERIFY(board->thresholdsKnown());
+        QCOMPARE(board->tOff(), 70.0);
+        QCOMPARE(board->vOn(), 6.8);
+
+        const QString head = QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:0,diag:1,pos:0,tgt:0,vel:0,mode:0,q1:0,t1:0,i1:0,q3:0,t3:0,i3:0");
+        link->injectLine(head + QStringLiteral(",temp:61.5,rh:40.0,vbat:6.62,lk:1"));
+        QVERIFY(board->hasTemp());
+        QCOMPARE(board->temp(), 61.5);
+        QCOMPARE(board->vbat(), 6.62);
+        QCOMPARE(board->tempLevel(), 1); // >= 70 - 10
+        QCOMPARE(board->vbatLevel(), 1); // < 6.80
+        QCOMPARE(board->source(), QStringLiteral("U7 qua U6"));
+        QCOMPARE(tel->fields().value(QStringLiteral("temp")).toDouble(), 61.5);
+        QVERIFY(!board->stale());
+        // SHT40 not read: no temp / rh -> no value, not 0
+        link->injectLine(head + QStringLiteral(",vbat:8.40,lk:1"));
+        QVERIFY(!board->hasTemp());
+        QVERIFY(qIsNaN(board->temp()));
+        QVERIFY(board->hasVbat());
+        QCOMPARE(board->batteryPct(), 100.0);
+        QCOMPARE(board->tempLevel(), 0);
+        QCOMPARE(board->vbatLevel(), 0);
+        link->injectLine(head + QStringLiteral(",temp:24.0,rh:50.0,vbat:1.20,lk:1"));
+        QVERIFY(!board->batteryPresent()); // < 3 V: no battery
+        QVERIFY(qIsNaN(board->batteryPct()));
+
+        // over-temperature: U6 line and "[U7]" line within 1 s -> one event
+        QSignalSpy ev(board, &BoardMonitor::event);
+        const int log0 = core.events()->count();
+        link->injectLine(QStringLiteral("OTEMP: board 72.0 C >= 70.0 C (SHT40 on U7), all motors off (flt 16)"));
+        link->injectLine(QStringLiteral("[U7] OTEMP: board 72.0 C >= 70.0 C (SHT40 on U7), all motors off (flt 16)"));
+        QCOMPARE(ev.count(), 1);
+        QCOMPARE(core.events()->count(), log0 + 1);
+        QCOMPARE(board->otempState(), 2);
+        QVERIFY(board->enableBlocked());
+        QCOMPARE(board->otempText(), QStringLiteral("Quá nhiệt 72.0 °C — đã tắt cả 6 motor"));
+        QCOMPARE(board->tempLevel(), 2);
+        QVERIFY(!board->blockReason().isEmpty());
+        // flt 16 in the log while tripped: no second event
+        link->injectLine(QStringLiteral("en:0,duty:0,out:0,i_mA:0,flt:16,diag:1,pos:0,tgt:0,vel:0,mode:0,temp:72.0,rh:30.0,vbat:7.9,lk:1"));
+        QCOMPARE(ev.count(), 1);
+        // e refused
+        link->injectLine(QStringLiteral("ERR board over-temperature, motors stay off ('sense')"));
+        QCOMPARE(board->otempState(), 2);
+        // cleared (twice) -> one event, banner "safe again", Enable unlocked
+        link->injectLine(QStringLiteral("OTEMP: cleared (< 60.0 C), send e to run again"));
+        link->injectLine(QStringLiteral("[U7] OTEMP: cleared (< 60.0 C), send e to run again"));
+        QCOMPARE(ev.count(), 2);
+        QCOMPARE(ev.last().at(2).toBool(), false);
+        QCOMPARE(board->otempState(), 1);
+        QCOMPARE(board->otempText(), QStringLiteral("Đã an toàn — bấm Enable để chạy lại"));
+        QVERIFY(!board->enableBlocked());
+        // the log still has flt 16 until e: stays "safe again"
+        link->injectLine(QStringLiteral("en:0,duty:0,out:0,i_mA:0,flt:16,diag:1,pos:0,tgt:0,vel:0,mode:0,temp:58.0,lk:1"));
+        QCOMPARE(board->otempState(), 1);
+        // Enable acknowledges, the app never sends e by itself
+        QVERIFY(!link->virtualSent().contains(QStringLiteral("e")));
+        QVERIFY(ctrl->enable());
+        QCOMPARE(board->otempState(), 0);
+
+        // battery low, from the flt bit only (connected after the event)
+        link->injectLine(QStringLiteral("en:0,duty:0,out:0,i_mA:0,flt:32,diag:1,pos:0,tgt:0,vel:0,mode:0,vbat:6.30,lk:1"));
+        QTest::qWait(1600); // past the settling time after e
+        link->injectLine(QStringLiteral("en:0,duty:0,out:0,i_mA:0,flt:32,diag:1,pos:0,tgt:0,vel:0,mode:0,vbat:6.30,lk:1"));
+        QCOMPARE(board->vbatState(), 2);
+        QCOMPARE(board->vbatText(), QStringLiteral("Pin yếu 6.30 V — đã tắt cả 6 motor"));
+        link->injectLine(QStringLiteral("VBAT: battery 6.31 V < 6.40 V, all motors off (flt 32)"));
+        QCOMPARE(board->vbatState(), 2);
+        link->injectLine(QStringLiteral("[U7] VBAT: ok (7.40 V), send e to run again"));
+        QCOMPARE(board->vbatState(), 1);
+        // flt bit gone (motors allowed again) -> banner off
+        link->injectLine(QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:0,diag:1,pos:0,tgt:0,vel:0,mode:0,vbat:7.40,lk:1"));
+        QCOMPARE(board->vbatState(), 0);
+
+        // link to U7 down
+        link->injectLine(QStringLiteral("ERR no sensor data (SHT40 + VBAT are on U7, link to U7 is down)"));
+        QVERIFY(!board->senseError().isEmpty());
+        // disconnect clears everything
+        link->close();
+        QVERIFY(!board->hasData());
+        QVERIFY(!board->thresholdsKnown());
+    }
+
+    void boardTwoPorts()
+    {
+        // both ports report the U7 sensor: one source (U7), not plotted twice
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        SerialLink *a = core.link();
+        SerialLink *b = core.link2();
+        core.hand()->setBenchJoint(core.hand()->indexOfKey(QStringLiteral("I")));
+        core.ctrl()->setDualPort(true);
+        a->openVirtual();
+        b->openVirtual();
+        a->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.9-g474 joints=3 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2"));
+        QCOMPARE(a->virtualSent().last(), QStringLiteral("sense")); // U7 not known yet
+        b->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.9-g474 joints=3 cnt90=7000 mcu=U7 motor=1(M) keys=M,R,P"));
+        QCOMPARE(b->virtualSent().last(), QStringLiteral("sense"));
+        a->clearVirtualSent();
+        b->clearVirtualSent();
+        QVERIFY(core.board()->refresh());
+        QCOMPARE(b->virtualSent(), QStringList{QStringLiteral("sense")});
+        QVERIFY(a->virtualSent().isEmpty());
+
+        b->injectLine(QStringLiteral("en:0,duty:0,out:0,i_mA:0,flt:0,diag:1,pos:0,tgt:0,vel:0,mode:0,q4:0,t4:0,i4:0,temp:25.0,rh:45.0,vbat:7.99"));
+        a->injectLine(QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:0,diag:1,pos:0,tgt:0,vel:0,mode:0,q3:0,t3:0,i3:0,temp:25.4,rh:45.0,vbat:7.98"));
+        QCOMPARE(core.board()->temp(), 25.0);
+        QCOMPARE(core.board()->source(), QStringLiteral("U7"));
+        const QVariantMap f = core.telemetry()->fields();
+        QCOMPARE(f.value(QStringLiteral("temp")).toDouble(), 25.0);
+        QVERIFY(!f.contains(QStringLiteral("U7.temp")));
+        QVERIFY(!f.contains(QStringLiteral("U6.temp")));
+        QVERIFY(!f.contains(QStringLiteral("U7.vbat")));
+    }
+
+    void recorderColumns()
+    {
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        Recorder *rec = core.recorder();
+        const QStringList h = rec->header();
+        QCOMPARE(h.first(), QStringLiteral("t"));
+        QVERIFY(h.contains(QStringLiteral("temp")));
+        QVERIFY(h.contains(QStringLiteral("rh")));
+        QVERIFY(h.contains(QStringLiteral("vbat")));
+        QCOMPARE(h.mid(1, 6), core.hand()->keys()); // replayable as a trajectory
+        const QString file = dir.filePath(QStringLiteral("rec.csv"));
+        QVERIFY(rec->start(file));
+        core.link()->openVirtual();
+        core.link()->injectLine(QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:0,diag:1,pos:0,tgt:0,vel:0,mode:0,q3:3500,t3:3500,i3:12,vbat:7.80"));
+        core.link()->injectLine(QStringLiteral("en:1,duty:0,out:0,i_mA:0,flt:0,diag:1,pos:0,tgt:0,vel:0,mode:0,q3:3500,t3:3500,i3:12,temp:26.5,rh:44.0,vbat:7.80"));
+        QCOMPARE(rec->rows(), 2);
+        rec->stop();
+        QFile f(file);
+        QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+        const QStringList lines = QString::fromUtf8(f.readAll()).split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+        QCOMPARE(lines.size(), 4); // comment, header, 2 rows
+        const QStringList r1 = lines[2].split(QLatin1Char(','));
+        const QStringList r2 = lines[3].split(QLatin1Char(','));
+        const int ti = h.indexOf(QStringLiteral("temp"));
+        QVERIFY(r1[ti].isEmpty()); // missing = empty, not 0
+        QCOMPARE(r2[ti], QStringLiteral("26.5"));
+        QCOMPARE(r2[h.indexOf(QStringLiteral("vbat"))], QStringLiteral("7.80"));
+        QCOMPARE(r2[h.indexOf(QStringLiteral("I"))], QStringLiteral("45.00"));
+        // the recording loads back as a trajectory
+        Trajectory tr(core.hand());
+        QVERIFY(tr.loadCsv(file));
     }
 
     void llmExtract()

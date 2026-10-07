@@ -51,6 +51,8 @@ QtObject {
     readonly property string home: "M4 11l8-7 8 7v9h-5v-6H9v6H4z"
     readonly property string target: "M12 4a8 8 0 1 0 0.01 0zM12 9a3 3 0 1 0 0.01 0zM12 1v4M12 19v4M1 12h4M19 12h4"
     readonly property string zero: "M12 5c-3 0-4.5 3-4.5 7s1.5 7 4.5 7 4.5-3 4.5-7-1.5-7-4.5-7zM8 17L16 7"
+    readonly property string record: "M12 6.5a5.5 5.5 0 1 0 0.01 0z"
+    readonly property string alert: "M12 3.5L2.5 20h19zM12 10v4.5M12 17.2h.01"
     readonly property string bolt: "M13 3L5 13.5h6L10 21l9-11h-6z"
     readonly property string send: "M4 12l16-8-6 16-3-6.5z"
     readonly property string info: "M12 3a9 9 0 1 0 0.01 0zM12 11v6M12 7.5h.01"

@@ -8,7 +8,11 @@ import CyberHand.Core
 Item {
     id: root
     readonly property var live: Core.live
-    property var hidden: ["en", "flt", "diag", "mode", "duty", "pos", "tgt", "vel"]
+    property var hidden: ["en", "flt", "diag", "mode", "duty", "pos", "tgt", "vel", "rh"]
+    // board sensors (fw 0.9) in every preset, on secondary axes (°C, V); rh off by default
+    readonly property var boardChannels: ["temp", "rh", "vbat"]
+    readonly property bool hasBoard: root.live.channelNames.indexOf("temp") >= 0 || root.live.channelNames.indexOf("vbat") >= 0
+    readonly property var shownOnly: root.presets[root.preset].only.length ? root.presets[root.preset].only.concat(root.boardChannels) : []
     property int preset: 0
     property real windowSec: 10
     readonly property var presets: [
@@ -42,6 +46,22 @@ Item {
             }
             IconButton { iconPath: Icons.trash; tip: qsTr("Xóa dữ liệu"); onClicked: root.live.clear() }
             VSep {}
+            // CSV of every log sample: angles, targets, currents, en / flt / mode, temp, rh, vbat
+            FlatButton {
+                text: Core.recorder.recording ? qsTr("Dừng ghi") : qsTr("Ghi CSV")
+                iconPath: Core.recorder.recording ? Icons.stop : Icons.record
+                iconFilled: true
+                danger: Core.recorder.recording
+                tip: Core.recorder.recording ? Core.recorder.file : qsTr("Ghi log ra CSV: góc, đích, dòng, en/flt/mode, temp, rh, vbat")
+                onClicked: Core.recorder.toggle()
+            }
+            TextLabel {
+                visible: Core.recorder.recording
+                color: Theme.liveRed
+                text: qsTr("%1 s · %2 dòng").arg(Core.recorder.seconds.toFixed(0)).arg(Core.recorder.rows)
+            }
+            IconButton { iconPath: Icons.folder; tip: qsTr("Mở thư mục bản ghi"); onClicked: Qt.openUrlExternally(Core.recorder.folder) }
+            VSep {}
             TextLabel {
                 secondary: true
                 text: Core.ctrl.connected ? qsTr("%1 kênh · %2 Hz").arg(root.live.channelNames.length).arg(Core.telemetry.sampleRate.toFixed(0))
@@ -62,7 +82,9 @@ Item {
             source: root.live
             followLatest: true
             window: root.windowSec
-            onlyChannels: root.presets[root.preset].only
+            onlyChannels: root.shownOnly
+            rightAxes: root.hasBoard ? [{ channels: ["temp", "rh"], label: "°C · %", minSpan: 5 },
+                                        { channels: ["vbat"], label: "V", minSpan: 0.5 }] : []
             hiddenChannels: root.hidden
             autoY: root.presets[root.preset].auto
             yMin: root.presets[root.preset].min
@@ -81,7 +103,7 @@ Item {
         PlotLegend {
             Layout.preferredWidth: 140
             Layout.fillHeight: true
-            readonly property var only: root.presets[root.preset].only
+            readonly property var only: root.shownOnly
             names: only.length ? root.live.channelNames.filter(function(n) { return only.indexOf(n) >= 0 }) : root.live.channelNames
             colors: names.map(function(n) { return Theme.seriesColor(root.live.channelNames.indexOf(n)) })
             hidden: root.hidden

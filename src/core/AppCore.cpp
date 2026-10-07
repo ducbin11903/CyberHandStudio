@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QQmlEngine>
 #include <QRegularExpression>
+#include <QScopeGuard>
 #include <QStandardPaths>
 
 AppCore::AppCore(const QString &configDir, QObject *parent)
@@ -40,6 +41,9 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_macros = new MacroRunner(m_ctrl, m_console, m_poses, this);
     m_calib = new Calibration(m_hand, m_ctrl, m_telemetry, m_link, m_console, this);
     m_cad = new CadModel(this);
+    m_board = new BoardMonitor(m_ctrl, this);
+    m_events = new EventLog(this);
+    m_recorder = new Recorder(m_hand, m_telemetry, m_board, this);
 
     QString dir = configDir;
     if (dir.isEmpty())
@@ -54,6 +58,9 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
         connect(l, &SerialLink::lineReceived, this, [this, i](const QString &line, double) { onLine(i, line); });
         connect(l, &SerialLink::lineSent, this, [this, i](const QString &line, bool quiet) {
             m_console->onSent(line, quiet, txTag(i));
+            // Enable acknowledges a "safe again" banner (the firmware refuses while still unsafe)
+            if (line == QLatin1String("e") || line.startsWith(QLatin1String("e ")))
+                m_board->onEnableSent();
         });
         connect(l, &SerialLink::connectedChanged, this, [this, i]() { onPortConnection(i); });
         connect(l, &SerialLink::errorStringChanged, this, [this, l]() {
@@ -92,6 +99,21 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     });
     connect(m_telemetry, &Telemetry::sample, m_live, &LiveSeries::addSample);
     connect(m_telemetry, &Telemetry::overCurrent, this, &AppCore::onOverCurrent);
+    // event log: over-current reactions, LINK, OTEMP, VBAT
+    connect(m_telemetry, &Telemetry::eventNoted, m_events, &EventLog::add);
+    connect(m_board, &BoardMonitor::event, this, [this](const QString &code, const QString &text, bool alarm) {
+        if (alarm)
+            m_console->error(text);
+        else
+            m_console->info(text);
+        m_telemetry->noteEvent(code, text, alarm);
+    });
+    connect(m_recorder, &Recorder::message, this, [this](const QString &text, bool error) {
+        if (error)
+            m_console->error(text);
+        else
+            m_console->info(text);
+    });
     connect(m_telemetry, &Telemetry::configFromFirmware, this, &AppCore::onFirmwareId);
     // G474: the main joint picks the motor (and port) of the single-motor commands
     connect(m_hand, &HandModel::benchJointChanged, this, [this]() {
@@ -186,6 +208,9 @@ void AppCore::registerQmlTypes()
     qmlRegisterUncreatableType<ConfigStore>(uri, 1, 0, "ConfigStore", why);
     qmlRegisterUncreatableType<Calibration>(uri, 1, 0, "Calibration", why);
     qmlRegisterUncreatableType<CadModel>(uri, 1, 0, "CadModel", why);
+    qmlRegisterUncreatableType<BoardMonitor>(uri, 1, 0, "BoardMonitor", why);
+    qmlRegisterUncreatableType<EventLog>(uri, 1, 0, "EventLog", why);
+    qmlRegisterUncreatableType<Recorder>(uri, 1, 0, "Recorder", why);
     qmlRegisterType<CadPose>(uri, 1, 0, "CadPose");
     qmlRegisterType<CadGeometry>(uri, 1, 0, "CadGeometry");
 }
@@ -211,6 +236,7 @@ void AppCore::onPortConnection(int port)
         if (m_ctrl->openPorts() == 1) {
             // first port of a session: fresh state, common time base for both ports
             m_telemetry->reset();
+            m_board->reset();
             m_live->clear();
             m_rxClock.start();
         }
@@ -219,10 +245,14 @@ void AppCore::onPortConnection(int port)
     } else {
         m_idTimer[port].stop();
         m_console->info(tr("Đã ngắt %1").arg(l->portName()));
-        if (!m_ctrl->connected())
+        m_boardSeen[port].invalidate();
+        if (!m_ctrl->connected()) {
+            m_recorder->stop();
             m_telemetry->reset();
-        else
+            m_board->reset();
+        } else {
             clearUnreachableFeedback();
+        }
     }
     if (!m_ctrl->connected() && m_fwConfigurable) {
         m_fwConfigurable = false;
@@ -287,6 +317,9 @@ void AppCore::onLine(int port, const QString &line)
         return;
     }
     m_console->onRx(text, src);
+    // board sensors: OK sense / OTEMP: / VBAT: / ERR board ... (from either MCU, duplicates merged)
+    if (m_board->processText(text))
+        return;
     if (peerLine && text.startsWith(QLatin1String("ID:"), Qt::CaseInsensitive))
         return; // the other MCU's own ID does not describe this port
     static const QRegularExpression reLink(QStringLiteral("^LINK:\\s*(\\w+)\\s*(U\\d+)?"), QRegularExpression::CaseInsensitiveOption);
@@ -327,13 +360,31 @@ void AppCore::onTelemetryLine(int port, double t, const QStringList &names, cons
         if (m_ctrl->setPeerUp(port, up))
             reportPeer(port, up, QStringLiteral("lk:%1").arg(up ? 1 : 0));
     }
+    // board sensors (on U7, every port reports them): one source, the port of U7 first
+    auto isBoardField = [](const QString &n) {
+        return n == QLatin1String("temp") || n == QLatin1String("rh") || n == QLatin1String("vbat");
+    };
+    bool hasBoard = false;
+    for (const QString &n : names)
+        hasBoard = hasBoard || isBoardField(n);
+    if (hasBoard)
+        m_boardSeen[port].start();
+    const QString label = m_ctrl->portLabel(port);
+    const int u7 = m_ctrl->portOfMcu(QStringLiteral("U7"));
+    const bool u7Fresh = u7 >= 0 && u7 != port && m_boardSeen[u7].isValid() && m_boardSeen[u7].elapsed() < 3000;
+    if (!u7Fresh)
+        m_board->updateFromLog(names, values, label == QLatin1String("U7") || label.isEmpty()
+                                                  ? QStringLiteral("U7")
+                                                  : QStringLiteral("U7 qua %1").arg(label));
+
     if (m_ctrl->openPorts() < 2) {
         m_telemetry->processTelemetry(t, names, values);
+        m_board->updateFault(m_telemetry->flt());
         return;
     }
     // 2 ports: keep each port's latest line; the port of the main joint publishes one
     // merged sample (its 10 channels + qN/tN/iN of both, flt of both, the other port's
-    // channels as "U7.out" ...)
+    // channels as "U7.out" ..., temp / rh / vbat once)
     PortLog &own = m_portLog[port];
     own.names = names;
     own.values = values;
@@ -344,8 +395,14 @@ void AppCore::onTelemetryLine(int port, double t, const QStringList &names, cons
         clock = port; // main port silent: any port drives the samples
     if (port != clock)
         return;
-    QStringList n = names;
-    QVector<double> v = values;
+    QStringList n;
+    QVector<double> v;
+    for (int k = 0; k < names.size() && k < values.size(); ++k) {
+        if (isBoardField(names[k]))
+            continue;
+        n << names[k];
+        v << values[k];
+    }
     const int other = 1 - port;
     if (fresh(other)) {
         const PortLog &o = m_portLog[other];
@@ -366,13 +423,28 @@ void AppCore::onTelemetryLine(int port, double t, const QStringList &names, cons
                 if (f >= 0)
                     v[f] = double(int(v[f]) | int(o.values[k]));
             }
-            if (name != QLatin1String("lk")) {
+            if (name != QLatin1String("lk") && !isBoardField(name)) {
                 n << pre + name;
                 v << o.values[k];
             }
         }
     }
+    if (!m_board->stale()) {
+        if (m_board->hasTemp()) {
+            n << QStringLiteral("temp");
+            v << m_board->temp();
+        }
+        if (m_board->hasRh()) {
+            n << QStringLiteral("rh");
+            v << m_board->rh();
+        }
+        if (m_board->hasVbat()) {
+            n << QStringLiteral("vbat");
+            v << m_board->vbat();
+        }
+    }
     m_telemetry->processTelemetry(t, n, v);
+    m_board->updateFault(m_telemetry->flt());
 }
 
 void AppCore::setActiveMode(const QString &m)
@@ -448,6 +520,16 @@ void AppCore::onFirmwareId(int joints, double cnt90)
     m_console->info(tr("%1Firmware: %2 khớp, %3 count/90°").arg(who).arg(joints).arg(cnt90));
     const bool g474 = m_telemetry->firmwareG474();
     const QStringList keys = m_telemetry->firmwareKeys();
+    // fw 0.9: read the board sensors once the ID (and the calibration push) went through;
+    // one port is enough (both report the U7 sensor), the port of U7 first
+    const bool boardFw = g474 && m_telemetry->firmwareHasBoardSensors();
+    if (boardFw)
+        m_board->setSupported(true);
+    auto senseAfter = qScopeGuard([this, port, boardFw]() {
+        const int u7 = m_ctrl->portOfMcu(QStringLiteral("U7"));
+        if (boardFw && (u7 < 0 || u7 == port))
+            m_ctrl->sendTo(port, QStringLiteral("sense"));
+    });
     if (g474) {
         // MCB G474: this port = one MCU with 3 motors (fw 0.8 bridge: both MCUs)
         const QString mcu = m_telemetry->firmwareMcu();
@@ -701,6 +783,7 @@ QJsonObject AppCore::collect() const
         {QStringLiteral("stopDeg"), m_calib->stopDeg()},
         {QStringLiteral("syncOnConnect"), m_calib->syncOnConnect()}});
     o.insert(QStringLiteral("refreshHz"), m_refreshHz);
+    o.insert(QStringLiteral("board"), QJsonObject{{QStringLiteral("cells"), m_board->cells()}});
     o.insert(QStringLiteral("joints"), m_hand->toJson());
     o.insert(QStringLiteral("player"), QJsonObject{
         {QStringLiteral("sendRate"), m_player->sendRate()},
@@ -776,6 +859,7 @@ void AppCore::apply(const QJsonObject &o)
         m_calib->setSyncOnConnect(cal.value(QStringLiteral("syncOnConnect")).toBool(m_calib->syncOnConnect()));
     }
     setRefreshHz(o.value(QStringLiteral("refreshHz")).toDouble(m_refreshHz));
+    m_board->setCells(o.value(QStringLiteral("board")).toObject().value(QStringLiteral("cells")).toInt(m_board->cells()));
     const QJsonObject p = o.value(QStringLiteral("player")).toObject();
     if (!p.isEmpty()) {
         m_player->setSendRate(p.value(QStringLiteral("sendRate")).toDouble(m_player->sendRate()));

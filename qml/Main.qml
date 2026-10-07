@@ -59,37 +59,97 @@ ApplicationWindow {
             }
         }
 
-        SplitView {
+        ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            orientation: Qt.Vertical
-            handle: Rectangle {
-                implicitHeight: Theme.gap
-                color: SplitHandle.pressed ? Theme.grid : (SplitHandle.hovered ? Theme.bgPanel : Theme.bgWindow)
-            }
+            spacing: Theme.gap
 
-            RowLayout {
-                SplitView.preferredHeight: win.height * 0.5
-                SplitView.minimumHeight: 300
-                spacing: Theme.gap
-                LeftPanel {
-                    visible: win.leftOpen
-                    Layout.preferredWidth: 420
-                    Layout.fillHeight: true
-                }
-                HandView3D {
+            // ---- board protection banner (firmware switched all motors off) -----
+            Repeater {
+                model: ["otemp", "vbat"]
+                Rectangle {
+                    id: banner
+                    readonly property int st: modelData === "otemp" ? Core.board.otempState : Core.board.vbatState
+                    readonly property string msg: modelData === "otemp" ? Core.board.otempText : Core.board.vbatText
+                    visible: st > 0
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
-                }
-                StatusPanel {
-                    Layout.preferredWidth: 280
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: 34
+                    radius: Theme.radius
+                    color: st === 2 ? Theme.liveRed : Theme.barFill
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 8
+                        spacing: 10
+                        Icon {
+                            Layout.preferredWidth: 18
+                            Layout.preferredHeight: 18
+                            path: banner.st === 2 ? Icons.alert : Icons.check
+                            color: Theme.textStrong
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            text: banner.msg
+                            color: Theme.textStrong
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSize + 2
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            visible: banner.st === 2
+                            text: modelData === "otemp"
+                                  ? (isNaN(Core.board.tOn) ? "" : qsTr("chạy lại khi < %1 °C").arg(Core.board.tOn.toFixed(1)))
+                                  : (isNaN(Core.board.vOn) ? "" : qsTr("chạy lại khi ≥ %1 V").arg(Core.board.vOn.toFixed(2)))
+                            color: Theme.textStrong
+                            opacity: 0.8
+                            font.family: Theme.fontFamily
+                            font.pixelSize: Theme.fontSmall
+                        }
+                        // safe again: the user presses Enable (the app never sends e by itself)
+                        FlatButton {
+                            visible: banner.st === 1
+                            text: qsTr("Enable")
+                            iconPath: Icons.power
+                            lockReason: Core.board.blockReason
+                            onClicked: Core.ctrl.enable()
+                        }
+                    }
                 }
             }
 
-            ModeArea {
-                SplitView.fillHeight: true
-                SplitView.minimumHeight: 260
+            SplitView {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                orientation: Qt.Vertical
+                handle: Rectangle {
+                    implicitHeight: Theme.gap
+                    color: SplitHandle.pressed ? Theme.grid : (SplitHandle.hovered ? Theme.bgPanel : Theme.bgWindow)
+                }
+
+                RowLayout {
+                    SplitView.preferredHeight: win.height * 0.5
+                    SplitView.minimumHeight: 300
+                    spacing: Theme.gap
+                    LeftPanel {
+                        visible: win.leftOpen
+                        Layout.preferredWidth: 420
+                        Layout.fillHeight: true
+                    }
+                    HandView3D {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
+                    StatusPanel {
+                        Layout.preferredWidth: 280
+                        Layout.fillHeight: true
+                    }
+                }
+
+                ModeArea {
+                    SplitView.fillHeight: true
+                    SplitView.minimumHeight: 260
+                }
             }
         }
     }

@@ -66,12 +66,13 @@ QString Telemetry::recentEvent() const
     return (m_eventClock.isValid() && m_eventClock.elapsed() < 3000) ? m_event : QString();
 }
 
-void Telemetry::noteEvent(const QString &code, const QString &text)
+void Telemetry::noteEvent(const QString &code, const QString &text, bool alarm)
 {
     m_event = code;
     m_eventText = text;
     m_eventClock.start();
     emit eventChanged();
+    emit eventNoted(code, text, alarm);
     emit updated();
 }
 
@@ -134,6 +135,7 @@ void Telemetry::reset()
         m_fwKeys.clear();
         m_fwLink.clear();
         m_fwG474 = false;
+        m_fwMajor = m_fwMinor = -1;
         emit firmwareIdChanged();
     }
     m_peak = 0;
@@ -147,11 +149,14 @@ void Telemetry::reset()
 
 QString Telemetry::faultText(int flt)
 {
+    // MCB fw 0.9 bits: 1 DIAG, 2 OVERI, 4 ESTOP, 8 LINK, 16 OTEMP, 32 VBAT
     QStringList l;
     if (flt & 1) l << QStringLiteral("DIAG");
     if (flt & 2) l << QStringLiteral("Quá dòng");
-    if (flt & 4) l << QStringLiteral("KEY");
-    if (flt & 0x100) l << QStringLiteral("LINK"); // fw 0.8: UART link to the other MCU lost
+    if (flt & 4) l << QStringLiteral("ESTOP");
+    if (flt & 8) l << QStringLiteral("LINK");
+    if (flt & 16) l << QStringLiteral("Quá nhiệt");
+    if (flt & 32) l << QStringLiteral("Pin yếu");
     return l.join(QStringLiteral(" · "));
 }
 
@@ -330,6 +335,11 @@ void Telemetry::processText(const QString &line)
         if (none.contains(m_fwLink, Qt::CaseInsensitive))
             m_fwLink = QStringLiteral("-");
         m_fwG474 = s.contains(QLatin1String("CyberHand-G474"), Qt::CaseInsensitive) || !m_fwKeys.isEmpty();
+        // "fw 0.9-g474" -> 0.9
+        static const QRegularExpression reVer(QStringLiteral("\\bfw\\s+(\\d+)\\.(\\d+)"));
+        const auto mv = reVer.match(s);
+        m_fwMajor = mv.hasMatch() ? mv.captured(1).toInt() : -1;
+        m_fwMinor = mv.hasMatch() ? mv.captured(2).toInt() : -1;
         emit firmwareIdChanged();
         static const QRegularExpression reJ(QStringLiteral("joints\\s*=\\s*(\\d+)"));
         static const QRegularExpression reC(QStringLiteral("cnt90\\s*=\\s*([0-9.]+)"));

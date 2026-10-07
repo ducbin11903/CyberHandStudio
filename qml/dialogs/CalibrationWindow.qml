@@ -59,6 +59,7 @@ ToolWindow {
                             accent: !(win.cal.running && win.cal.joint === index)
                             enabled: (!win.cal.running || win.cal.joint === index) && !modelData.offPort
                             tip: qsTr("Home về chặn duỗi rồi gập tới chặn gập, đo hành trình")
+                            lockReason: win.cal.running ? "" : Core.board.blockReason
                             onClicked: {
                                 if (win.cal.running) { win.cal.stopSweep(); return }
                                 win.cal.joint = index

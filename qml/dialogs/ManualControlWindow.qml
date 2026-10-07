@@ -126,7 +126,7 @@ ToolWindow {
                             Layout.alignment: Qt.AlignHCenter
                             visible: Core.ctrl.layoutKnown && !col.j.offPort
                             spacing: 2
-                            FlatButton { text: "E"; tip: "e " + col.j.key; onClicked: Core.ctrl.enableJoint(index) }
+                            FlatButton { text: "E"; tip: "e " + col.j.key; lockReason: Core.board.blockReason; onClicked: Core.ctrl.enableJoint(index) }
                             FlatButton { text: "D"; danger: true; tip: "d " + col.j.key; onClicked: Core.ctrl.disableJoint(index) }
                         }
                         NumberField {

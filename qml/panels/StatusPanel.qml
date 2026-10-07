@@ -17,7 +17,26 @@ Card {
         var p = Core.ctrl.ports
         for (var i = 0; i < p.length; ++i)
             if (p[i].open && p[i].peer.length) return true
-        return (tel.flt & 0x100) !== 0
+        return (tel.flt & 8) !== 0
+    }
+    readonly property var board: Core.board
+    function levelColor(l) { return l === 2 ? Theme.liveRed : (l === 1 ? Theme.warnAmber : Theme.textStrong) }
+
+    // one board value: caption, value, unit
+    component BoardValue: ColumnLayout {
+        id: bv
+        property string title
+        property string value
+        property string unit
+        property color valueColor: Theme.textStrong
+        spacing: 0
+        Layout.fillWidth: true
+        TextLabel { text: bv.title; secondary: true; font.pixelSize: Theme.fontTiny }
+        RowLayout {
+            spacing: 2
+            TextLabel { text: bv.value; color: bv.valueColor; font.pixelSize: Theme.fontSize + 4 }
+            TextLabel { text: bv.unit; muted: true; font.pixelSize: Theme.fontTiny; Layout.alignment: Qt.AlignBottom; Layout.bottomMargin: 2 }
+        }
     }
     readonly property bool linkLost: {
         var p = Core.ctrl.ports
@@ -121,25 +140,31 @@ Card {
             }
         }
 
-        // faults
+        // faults: 1 DIAG, 2 OVERI, 4 ESTOP, 8 LINK, 16 OTEMP, 32 VBAT
         RowLayout {
             Layout.fillWidth: true
             Layout.leftMargin: 10
             Layout.rightMargin: 10
             spacing: 4
-            TextLabel { text: qsTr("Faults"); secondary: true; font.pixelSize: Theme.fontTiny; Layout.preferredWidth: 42 }
-            Repeater {
-                model: [{ bit: 1, name: "DIAG" }, { bit: 2, name: qsTr("Quá dòng") }, { bit: 4, name: "KEY" }, { bit: 0x100, name: "LINK" }]
-                Badge {
-                    visible: modelData.bit !== 0x100 || root.linkMode
-                    readonly property bool active: root.live && ((root.tel.flt & modelData.bit) || (modelData.bit === 1 && root.tel.diagLow)
-                                                                 || (modelData.bit === 0x100 && root.linkLost))
-                    text: modelData.name
-                    fill: active ? Theme.liveRed : Theme.bgSunken
-                    textColor: active ? Theme.textStrong : Theme.textMuted
+            TextLabel { text: qsTr("Faults"); secondary: true; font.pixelSize: Theme.fontTiny; Layout.preferredWidth: 42; Layout.alignment: Qt.AlignTop; Layout.topMargin: 3 }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 4
+                Repeater {
+                    model: [{ bit: 1, name: "DIAG" }, { bit: 2, name: qsTr("Quá dòng") }, { bit: 4, name: "ESTOP" }, { bit: 8, name: "LINK" },
+                            { bit: 16, name: qsTr("Quá nhiệt") }, { bit: 32, name: qsTr("Pin yếu") }]
+                    Badge {
+                        visible: modelData.bit < 8 || (modelData.bit === 8 && root.linkMode) || (modelData.bit >= 16 && root.board.supported)
+                        readonly property bool active: (root.live && ((root.tel.flt & modelData.bit) || (modelData.bit === 1 && root.tel.diagLow)
+                                                                      || (modelData.bit === 8 && root.linkLost)))
+                                                       || (modelData.bit === 16 && root.board.otempState === 2)
+                                                       || (modelData.bit === 32 && root.board.vbatState === 2)
+                        text: modelData.name
+                        fill: active ? Theme.liveRed : Theme.bgSunken
+                        textColor: active ? Theme.textStrong : Theme.textMuted
+                    }
                 }
             }
-            Item { Layout.fillWidth: true }
         }
         TextLabel {
             Layout.fillWidth: true
@@ -156,12 +181,124 @@ Card {
                 var m = []
                 if (root.tel.diagLow) m.push(qsTr("Chân DIAG đang thấp khi driver bật: driver lỗi hoặc mất nguồn motor."))
                 if (root.linkLost) m.push(qsTr("Link UART tới MCU kia mất: khớp của MCU đó bị khóa."))
-                else if (root.tel.flt & 0x100) m.push(qsTr("MCU kia đã tắt motor do mất link (watchdog). Link đã lên lại: Clear fault (c) để chạy tiếp."))
+                else if (root.tel.flt & 8) m.push(qsTr("MCU kia đã tắt motor do mất link (watchdog). Link đã lên lại: Clear fault (c) để chạy tiếp."))
                 if (root.tel.noMotion && Math.abs(root.tel.iMa) < 20)
                     m.push(qsTr("Có duty nhưng không quay và không có dòng: kiểm tra nguồn motor, dây motor/encoder."))
                 else if (root.tel.noMotion)
                     m.push(qsTr("Có dòng nhưng không quay: kẹt hoặc chạm chặn cơ khí."))
                 return m.join("\n")
+            }
+        }
+
+        // ---- board sensors (fw 0.9: SHT40 + VBAT on U7) --------------------
+        SectionHeader {
+            id: boardHdr
+            Layout.fillWidth: true
+            Layout.topMargin: 10
+            title: qsTr("Board")
+            visible: root.board.supported || root.board.hasData
+            TextLabel {
+                y: 5
+                font.pixelSize: Theme.fontTiny
+                muted: true
+                text: {
+                    if (!root.board.hasData) return root.board.senseError.length ? "" : qsTr("chưa có số liệu")
+                    var a = root.board.ageMs
+                    return qsTr("từ %1 · %2").arg(root.board.source).arg(a < 0 ? "—" : (a < 1000 ? a + " ms" : (a / 1000).toFixed(a < 10000 ? 1 : 0) + " s"))
+                }
+            }
+            IconButton {
+                width: 18; height: 18
+                iconSize: 12
+                iconPath: Icons.refresh
+                tip: qsTr("Đọc lại cảm biến (sense)")
+                enabled: Core.ctrl.connected
+                onClicked: root.board.refresh()
+            }
+        }
+        ColumnLayout {
+            visible: boardHdr.visible && boardHdr.expanded
+            Layout.fillWidth: true
+            Layout.leftMargin: 10
+            Layout.rightMargin: 10
+            Layout.topMargin: 6
+            spacing: 6
+            // no new values for 3 s: dimmed
+            opacity: root.board.stale ? 0.45 : 1.0
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                BoardValue {
+                    title: qsTr("Nhiệt độ")
+                    value: root.board.hasTemp ? root.board.temp.toFixed(1) : "—"
+                    unit: "°C"
+                    valueColor: root.levelColor(root.board.tempLevel)
+                }
+                BoardValue {
+                    title: qsTr("Độ ẩm")
+                    value: root.board.hasRh ? root.board.rh.toFixed(0) : "—"
+                    unit: "%"
+                }
+                BoardValue {
+                    title: "VBAT"
+                    value: root.board.hasVbat ? root.board.vbat.toFixed(2) : "—"
+                    unit: root.board.hasVbat && !root.board.batteryPresent ? qsTr("không pin") : "V"
+                    valueColor: root.levelColor(root.board.vbatLevel)
+                }
+                BoardValue {
+                    title: qsTr("Pin %1S").arg(root.board.cells)
+                    value: isNaN(root.board.batteryPct) ? "—" : Math.round(root.board.batteryPct)
+                    unit: "%"
+                    valueColor: root.levelColor(root.board.vbatLevel)
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 1
+                    TextLabel { text: qsTr("°C · 10 phút"); muted: true; font.pixelSize: Theme.fontTiny }
+                    Sparkline {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 30
+                        points: root.board.tempHistory
+                        now: root.board.historyNow
+                        minSpan: 4
+                        lineColor: root.board.tempLevel === 0 ? Theme.infoBlue : root.levelColor(root.board.tempLevel)
+                        thresholds: root.board.thresholdsKnown
+                                    ? [{ v: root.board.tOff, color: Theme.liveRed }, { v: root.board.tOff - 10, color: Theme.warnAmber }]
+                                    : []
+                    }
+                }
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 1
+                    TextLabel { text: qsTr("V · 10 phút"); muted: true; font.pixelSize: Theme.fontTiny }
+                    Sparkline {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 30
+                        points: root.board.vbatHistory
+                        now: root.board.historyNow
+                        minSpan: 0.4
+                        lineColor: root.board.vbatLevel === 0 ? Theme.accentGreen : root.levelColor(root.board.vbatLevel)
+                        thresholds: root.board.thresholdsKnown
+                                    ? [{ v: root.board.vOff, color: Theme.liveRed }, { v: root.board.vOn, color: Theme.warnAmber }]
+                                    : []
+                    }
+                }
+            }
+            TextLabel {
+                Layout.fillWidth: true
+                visible: text.length > 0
+                wrapMode: Text.WordWrap
+                elide: Text.ElideNone
+                font.pixelSize: Theme.fontTiny
+                color: Theme.liveRed
+                text: root.board.senseError.length ? root.board.senseError
+                      : (root.board.supported && !root.board.hasTemp && root.board.i2cErr > 0
+                         ? qsTr("SHT40 không đọc được (lỗi I2C %1)").arg(root.board.i2cErr) : "")
             }
         }
 

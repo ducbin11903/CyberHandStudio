@@ -97,7 +97,7 @@ MCU có USB (master) chuyển lệnh của MCU kia qua UART4 và gộp log. App 
 - `LINK: up U7` / `LINK: lost U7` (firmware in ID mới trước đó). Log thêm `lk:1|0`.
 - Mất link: khớp M, R, P mờ "chưa kết nối", lệnh tới chúng bị chặn, chip **LINK** đỏ, sự kiện LINK.
   Link lên lại: app gửi lại `m`/`j`/`I` cho các khớp vừa quay lại.
-- `flt` bit 8 (0x100) = LINK (MCU bị bridge tự tắt motor khi mất heartbeat 300 ms) → chip LINK, Clear fault để chạy lại.
+- `flt` 8 = LINK (MCU bị bridge tự tắt motor khi mất heartbeat 300 ms) → chip LINK, Clear fault để chạy lại.
 - `@U7 <dòng>` gửi thô qua link (firmware xử lý). App bật DTR khi mở cổng và gửi `i` nếu 500 ms chưa có ID.
 
 Mô phỏng: `fw_sim.py --g474 U6 --bridge`; trong console gõ `link off` / `link on` để thử mất link.
@@ -107,6 +107,57 @@ Mô phỏng: `fw_sim.py --g474 U6 --bridge`; trong console gõ `link off` / `lin
 - Log: `q1..q6` (pos, count), `t1..t6` (tgt, count), `i1..i6` (mA), `en`, `flt`, `mode`.
 - Lệnh: giao thức "Từng khớp" gửi `g <khớp 1-6> <độ>`; giao thức "1 dòng" gửi `G q1 q2 q3 q4 q5 q6`.
 - Thứ tự khớp: T2, T1, I, M, R, P (như trên board MCB).
+
+## Cảm biến bo mạch (fw 0.9)
+
+SHT40 (nhiệt độ + độ ẩm, I2C) và cầu chia VBAT (đo tối đa ~10.3 V) chỉ nằm trên U7; U6 nhận giá trị qua link UART,
+nên cổng nào (1 cổng hay 2 cổng) cũng có số liệu. Firmware tự bảo vệ: quá nhiệt hoặc pin yếu thì tắt cả 6 motor;
+app chỉ hiển thị và cảnh báo.
+
+**Log** — sau `qN/tN/iN`, trước `lk:`: `...,q6:..,t6:..,i6:..,temp:25.0,rh:45.0,vbat:7.99,lk:1`
+- `temp` °C (1 số lẻ, có thể âm), `rh` %RH, `vbat` V (2 số lẻ).
+- `temp`/`rh` chỉ có khi SHT40 đọc được; `vbat` chỉ có khi đã đo. Thiếu trường → hiển thị "—", không coi là 0
+  (CSV để trống). VBAT < 3 V = không cắm pin.
+- 2 cổng: cả hai log đều có `temp/rh/vbat` → app lấy một nguồn, ưu tiên cổng U7 (cổng kia chỉ dùng khi U7 im > 3 s),
+  không vẽ trùng (không có `U7.temp`).
+
+**Lệnh `sense`** — app gửi sau ID của fw ≥ 0.9 (tới cổng U7 nếu đang mở) và khi bấm làm mới:
+```
+OK sense U7 T=25.0 C RH=45.0 % VBAT=7.99 V | off at T>=70.0 C (on <60.0) VBAT<6.40 V (on >=6.80) | hot=0 low=0 i2c_err=0
+```
+- Có thể thêm ` (T invalid)` (T=n/a, RH=n/a) hoặc ` (VBAT not measured)`.
+- Lỗi: `ERR no sensor data (SHT40 + VBAT are on U7, link to U7 is down)`.
+- Ngưỡng (70.0 / 60.0 / 6.40 / 6.80) lấy từ dòng này (hoặc từ dòng sự kiện), không hard-code; chưa có thì không vẽ vạch.
+
+**Sự kiện** (có thể có tiền tố `[U7] ` / `[U6] ` — app bỏ trước khi parse):
+```
+OTEMP: board 72.0 C >= 70.0 C (SHT40 on U7), all motors off (flt 16)
+OTEMP: cleared (< 60.0 C), send e to run again
+VBAT: battery 6.31 V < 6.40 V, all motors off (flt 32)
+VBAT: ok (7.40 V), send e to run again
+```
+- Cùng sự kiện đến 2 lần trong ~1 s (dòng U6 + dòng `[U7]`, hoặc từ 2 cổng) → app gộp thành 1 (cửa sổ 1.5 s).
+- Khi đang bị chặn, `e` trả về `ERR board over-temperature, motors stay off ('sense')` /
+  `ERR board battery low, motors stay off ('sense')`.
+
+**Bit `flt`**: 1 DIAG, 2 OVERI (quá dòng), 4 ESTOP, 8 LINK, 16 OTEMP (quá nhiệt), 32 VBAT (pin yếu).
+
+**App**
+- Status → ô **Board**: nhiệt độ, độ ẩm, VBAT, % pin (LiPo, số cell ở Settings → Board, mặc định 2S: 6.4 V = 0 %,
+  8.4 V = 100 %, nội suy theo đường cong xả), "từ U7" + tuổi dữ liệu (> 3 s không có số mới → mờ),
+  sparkline 10 phút cho °C và V kèm vạch ngưỡng. Màu: bình thường / cảnh báo (T ≥ ngưỡng tắt − 10 °C,
+  VBAT < ngưỡng bật lại) / báo động (hot=1, low=1, flt 16/32). Chip **Quá nhiệt** / **Pin yếu** trong Faults.
+- OTEMP / VBAT (hoặc flt 16/32): banner đỏ cố định "Quá nhiệt 72.0 °C — đã tắt cả 6 motor" /
+  "Pin yếu 6.31 V — đã tắt cả 6 motor"; nút Enable (Motor, Manual Control E, Calibration Start) bị khóa, tooltip ghi lý do.
+  Dòng `cleared` / `ok` → banner "Đã an toàn — bấm Enable để chạy lại" (app không tự gửi `e`); gửi `e` → banner tắt.
+  Sự kiện ghi vào Console và Event log (Data Monitor) kèm giờ.
+- Live: `temp` / `rh` / `vbat` là kênh riêng trên trục Y phụ bên phải (°C · %, V), `rh` mặc định tắt.
+- Live → **Ghi CSV**: `Documents/CyberHandStudio/recordings/rec_<ngày>_<giờ>.csv`, cột
+  `t, T2..P (độ), T2_tgt.., T2_mA.., en, flt, mode, temp, rh, vbat` (mở lại được trong Text mode).
+
+Mô phỏng (`fw_sim.py --g474 ...`): log có `temp/rh/vbat`, `sense`, sự kiện OTEMP/VBAT, flt 16/32, từ chối `e`;
+lệnh thử `simtemp <C>`, `simvbat <V>`, `simsht off|on`; tham số `--temp`, `--vbat`. Ở chế độ 2 tiến trình
+(`--g474 U6` + `--g474 U7`) mỗi sim tự giả lập cảm biến (U6 không nhận được giá trị của U7), nên `simtemp` gửi cho từng cổng.
 
 ## CSV quỹ đạo (chế độ Text)
 

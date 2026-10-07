@@ -123,6 +123,7 @@ Item {
                             var t = model.text
                             if (t.indexOf("ERR") === 0) return Theme.liveRed
                             if (t.indexOf("HOME:") === 0) return Theme.playhead
+                            if (t.indexOf("OTEMP:") === 0 || t.indexOf("VBAT:") === 0 || t.indexOf("LINK:") === 0) return Theme.warnAmber
                             if (t.indexOf("OK") === 0) return Theme.textStrong
                             return Theme.textPrimary
                         }
