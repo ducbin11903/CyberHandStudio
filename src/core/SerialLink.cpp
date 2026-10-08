@@ -111,6 +111,9 @@ void SerialLink::close()
     }
     if (!m_port.isOpen())
         return;
+    // lines written just before (stop on Disconnect) must reach the firmware
+    if (m_port.bytesToWrite() > 0)
+        m_port.waitForBytesWritten(300);
     m_port.close();
     m_rxBuf.clear();
     emit connectedChanged();

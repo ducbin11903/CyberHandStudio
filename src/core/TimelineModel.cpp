@@ -627,10 +627,10 @@ void TimelineModel::makeDemo()
     emit lengthChanged();
     // opposition: thumb rotates in, index closes to meet it, others curl a bit, then release
     auto add = [&](int track, double s, double d, double tgt, int e) { addClip(track, s, d, tgt, e); };
-    add(0, 0.0, 1.0, 70, Smooth);   // T2 rotate
-    add(0, 3.6, 1.2, 0, Smooth);
-    add(1, 0.4, 1.0, 45, Smooth);   // T1 flex
-    add(1, 3.4, 1.2, 0, EaseOut);
+    add(1, 0.0, 1.0, 70, Smooth);   // T1 rotate
+    add(1, 3.6, 1.2, 0, Smooth);
+    add(0, 0.4, 1.0, 45, Smooth);   // T2 flex
+    add(0, 3.4, 1.2, 0, EaseOut);
     add(2, 0.8, 1.2, 55, Smooth);   // I
     add(2, 3.2, 1.2, 0, Smooth);
     add(3, 1.0, 1.4, 80, Linear);   // M

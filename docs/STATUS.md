@@ -47,9 +47,16 @@ Cập nhật: 2026-09-27
 - Bit flt mới: 4 ESTOP, 8 LINK, 16 OTEMP, 32 VBAT. Event log (Data Monitor). Trục Y phụ trong Live. Ghi CSV.
 - fw_sim: temp/rh/vbat, `sense`, OTEMP/VBAT, `simtemp/simvbat/simsht`, `--temp/--vbat`.
 
+### 0.5.1
+
+- T1 = Thumb Rotation, T2 = Thumb Flexion (tên khớp, mô hình 3D, mẫu timeline/CSV, pose Pinch, tay cầm, AI); profile cũ tự đổi tên.
+- Disconnect (và thoát app): dừng phát, gửi `D` (G474) hoặc `0` + `d` (bench) tới mọi cổng trước khi đóng.
+- Mô phỏng khi đang kết nối: Output tắt (Timeline/Text/Manual/Controller) hoặc Stream không Mirror → 3D chạy theo lệnh,
+  bóng xanh = tay thật.
+
 ## Giả định cần Duc xác nhận
 
-- T2 = xoay ngón cái (opposition), T1 = gập ngón cái.
+- (đã xác nhận) T1 = xoay ngón cái (Thumb Rotation, opposition), T2 = gập ngón cái (Thumb Flexion).
 - Bench H562 map vào khớp Index.
 - Hệ số khớp PIP/DIP của mô hình 3D (0.8 / 0.4 so với MCP) chỉ để hiển thị.
 

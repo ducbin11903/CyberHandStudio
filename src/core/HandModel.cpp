@@ -163,7 +163,8 @@ HandModel::HandModel(QObject *parent)
 {
     const QStringList keys = {QStringLiteral("T2"), QStringLiteral("T1"), QStringLiteral("I"),
                               QStringLiteral("M"), QStringLiteral("R"), QStringLiteral("P")};
-    const QStringList names = {QStringLiteral("Thumb Rotation"), QStringLiteral("Thumb Flexion"),
+    // T2 = thumb flexion, T1 = thumb rotation across the palm (opposition)
+    const QStringList names = {QStringLiteral("Thumb Flexion"), QStringLiteral("Thumb Rotation"),
                                QStringLiteral("Index"), QStringLiteral("Middle"),
                                QStringLiteral("Ring"), QStringLiteral("Pinky")};
     for (int i = 0; i < keys.size(); ++i) {

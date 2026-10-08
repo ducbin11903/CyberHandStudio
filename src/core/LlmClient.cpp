@@ -59,7 +59,7 @@ QString LlmClient::systemPrompt() const
     return QStringLiteral(
                "You write motion trajectories for CyberHand, a right robotic hand with 6 actuated joints.\n"
                "Joints (0 deg = fully extended/open, larger = more flexed/closed):\n%1"
-               "T2 rotates the thumb across the palm (opposition), T1 flexes the thumb.\n"
+               "T1 rotates the thumb across the palm (opposition), T2 flexes the thumb.\n"
                "Motors are slow geared DC motors: keep each joint below about 60 deg/s and avoid instant jumps.\n\n"
                "Reply with ONLY a CSV block, no prose:\n"
                "```csv\nt,T2,T1,I,M,R,P\n0,0,0,0,0,0,0\n...\n```\n"

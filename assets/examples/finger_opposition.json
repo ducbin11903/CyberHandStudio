@@ -4,28 +4,28 @@
   "length": 6,
   "clips": [
     {
-      "track": "T2",
+      "track": "T1",
       "start": 0,
       "duration": 1,
       "target": 70,
       "easing": "smooth"
     },
     {
-      "track": "T2",
+      "track": "T1",
       "start": 3.6,
       "duration": 1.2,
       "target": 0,
       "easing": "smooth"
     },
     {
-      "track": "T1",
+      "track": "T2",
       "start": 0.4,
       "duration": 1,
       "target": 45,
       "easing": "smooth"
     },
     {
-      "track": "T1",
+      "track": "T2",
       "start": 3.4,
       "duration": 1.2,
       "target": 0,

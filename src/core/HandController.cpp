@@ -581,6 +581,18 @@ bool HandController::sendTo(int port, const QString &line)
     return !t.isEmpty() && writeTo(port, t, false);
 }
 
+void HandController::stopAll()
+{
+    for (int p : openPortList()) {
+        if (!m_ports[p].keys.isEmpty()) {
+            writeTo(p, QStringLiteral("D"), false); // MCB G474: all motors off (bridge: both MCUs)
+        } else {
+            writeTo(p, QStringLiteral("0"), false); // open loop duty 0
+            writeTo(p, QStringLiteral("d"), false); // driver off
+        }
+    }
+}
+
 bool HandController::sendAll(const QString &line)
 {
     const QString t = line.trimmed();

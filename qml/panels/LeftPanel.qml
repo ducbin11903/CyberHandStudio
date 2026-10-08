@@ -491,6 +491,13 @@ Card {
                             centered: true
                             value: Core.telemetry.hasData ? Core.telemetry.duty : 0
                             onPressedChanged: if (!pressed) Core.ctrl.setDuty(value)
+                            // a drag breaks the binding: follow the firmware again (0 when disconnected)
+                            Connections {
+                                target: Core.ctrl
+                                function onConnectedChanged() {
+                                    dutySlider.value = Qt.binding(function() { return Core.telemetry.hasData ? Core.telemetry.duty : 0 })
+                                }
+                            }
                         }
                         ValueBox { Layout.preferredWidth: 50; text: Math.round(dutySlider.value) + "%" }
                     }

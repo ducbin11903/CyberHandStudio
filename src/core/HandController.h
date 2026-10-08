@@ -94,6 +94,8 @@ public:
     Q_INVOKABLE bool sendTo(int port, const QString &line);
     // every open port
     Q_INVOKABLE bool sendAll(const QString &line);
+    // every motor to duty 0 / off on every open port (G474: D, bench board: 0 then d)
+    Q_INVOKABLE void stopAll();
 
     // e / d / c without a joint = every motor of the MCU (both MCUs with 2 ports)
     Q_INVOKABLE bool enable() { return sendAll(QStringLiteral("e")); }

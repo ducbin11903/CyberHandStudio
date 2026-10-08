@@ -5,7 +5,8 @@ import QtQuick.Layouts
 import CyberHand
 import CyberHand.Core
 
-// 3D preview of the hand: solid = measured (or commanded when no feedback), ghost = target.
+// 3D preview of the hand: solid = measured, ghost = target.
+// Simulating (not connected, or the active source is not sent): solid = commands, ghost = real hand.
 Card {
     id: root
     readonly property var joints: Core.hand.joints
@@ -18,9 +19,10 @@ Card {
     // CAD model (Visual -> Mô hình 3D) or the block hand
     readonly property bool useCad: Core.cad.loaded && Core.ui.model3d !== "blocks"
 
+    readonly property bool sim: Core.simulating
     function previewAngles() {
         var a = []
-        for (var i = 0; i < joints.length; ++i) a.push(joints[i].previewDeg)
+        for (var i = 0; i < joints.length; ++i) a.push(root.sim ? joints[i].commandDeg : joints[i].previewDeg)
         return a
     }
     // redrawn at the Visual Refresh Rate instead of on every telemetry line
@@ -40,8 +42,10 @@ Card {
     }
     function targetAngles() {
         var a = []
-        for (var i = 0; i < joints.length; ++i)
-            a.push(joints[i].hasFeedback ? joints[i].targetDeg : joints[i].commandDeg)
+        for (var i = 0; i < joints.length; ++i) {
+            var j = joints[i]
+            a.push(!j.hasFeedback ? j.commandDeg : (root.sim ? j.measuredDeg : j.targetDeg))
+        }
         return a
     }
 
@@ -139,13 +143,13 @@ Card {
         Row {
             spacing: 5
             Rectangle { width: 10; height: 10; radius: 2; color: "#D6D6D6"; anchors.verticalCenter: parent.verticalCenter }
-            TextLabel { text: root.anyFeedback ? qsTr("Đo được") : qsTr("Lệnh / mô phỏng"); font.pixelSize: Theme.fontSmall }
+            TextLabel { text: root.sim ? qsTr("Mô phỏng (lệnh)") : qsTr("Đo được"); font.pixelSize: Theme.fontSmall }
         }
         Row {
             visible: root.ghostOn
             spacing: 5
             Rectangle { width: 10; height: 10; radius: 2; color: Theme.alpha(Theme.infoBlue, 0.5); anchors.verticalCenter: parent.verticalCenter }
-            TextLabel { text: qsTr("Đích"); font.pixelSize: Theme.fontSmall }
+            TextLabel { text: root.sim && root.anyFeedback ? qsTr("Tay thật") : qsTr("Đích"); font.pixelSize: Theme.fontSmall }
         }
     }
     Row {
@@ -183,11 +187,11 @@ Card {
                 Rectangle { width: 7; height: 7; radius: 3.5; color: Theme.jointColor(index); anchors.verticalCenter: parent.verticalCenter }
                 TextLabel { text: modelData.key; width: 18; font.pixelSize: Theme.fontSmall; secondary: true }
                 TextLabel {
-                    text: Number(modelData.previewDeg).toFixed(1) + "°"
+                    text: Number(root.sim ? modelData.commandDeg : modelData.previewDeg).toFixed(1) + "°"
                     width: 44
                     horizontalAlignment: Text.AlignRight
                     font.pixelSize: Theme.fontSmall
-                    color: modelData.hasFeedback ? Theme.textStrong : Theme.textSecondary
+                    color: modelData.hasFeedback && !root.sim ? Theme.textStrong : Theme.textSecondary
                 }
                 TextLabel {
                     visible: modelData.offPort

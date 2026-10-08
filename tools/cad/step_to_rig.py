@@ -16,7 +16,7 @@ the pins' cylinder axes, so moving a pin in CAD moves the joint.
 Finger (paper 2408.02293, fig. 2b): four-bar A (MCP pin, motor) - B (PIP pin) -
 C (pin in the fingertip) - D (pin in palm_connector). AB = proximal phalanx (input),
 BC = fingertip (coupler, DIP fixed), CD = spring link (follower), AD = ground.
-Thumb: T2 turns thumb_base about its pin; T1 is the same four-bar on the thumb, with
+Thumb: T1 (rotation) turns thumb_base about its pin; T2 (flexion) is the same four-bar on the thumb, with
 D = hook of the spring extension on thumb_base.
 """
 import argparse
@@ -335,10 +335,11 @@ def write(out_dir, items, link_of, joints, name):
     A2, d2 = joints["T2"]["A"]
     tip = np.vstack([it["P"] for it, l in zip(items, link_of) if l == "T_tip"]).mean(0)
     s2 = 1.0 if np.cross(d2, tip - A2)[0] > 0 else -1.0
-    js.append(dict(key="T2", type="revolute", axis=jp(d2 * s2), point=jp(A2), link="T_base", children=["T_pp", "T_tip", "T_cd"]))
+    # app keys: T1 = thumb rotation (revolute base), T2 = thumb flexion (four-bar)
+    js.append(dict(key="T1", type="revolute", axis=jp(d2 * s2), point=jp(A2), link="T_base", children=["T_pp", "T_tip", "T_cd"]))
     J = joints["T1"]
     s1 = 1.0 if np.cross(J["A"][1], J["B"][0] - J["A"][0])[2] > 0 else -1.0
-    js.append(dict(key="T1", type="fourbar", parent="T2", axis=jp(J["A"][1] * s1), A=jp(J["A"][0]), B=jp(J["B"][0]),
+    js.append(dict(key="T2", type="fourbar", parent="T1", axis=jp(J["A"][1] * s1), A=jp(J["A"][0]), B=jp(J["B"][0]),
                    C=jp(J["C"][0]), D=jp(J["D"][0]), input="T_pp", coupler="T_tip", follower="T_cd"))
     rig = dict(format="cyberhand-rig-1", name=name, units="mm", mesh="hand.bin",
                bounds=[jp(lo), jp(hi)],

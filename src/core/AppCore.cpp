@@ -178,7 +178,23 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
 
     m_config->loadLastOrDefault();
     loadCad(m_ui.value(QStringLiteral("cadFolder")).toString());
-    connect(qApp, &QGuiApplication::aboutToQuit, this, [this]() { m_config->save(); });
+    connect(qApp, &QGuiApplication::aboutToQuit, this, [this]() {
+        m_config->save();
+        // closing the app: every motor to duty 0 before the ports go away
+        if (m_ctrl->connected()) {
+            m_player->pause();
+            m_ctrl->stopAll();
+            m_link->close();
+            m_link2->close();
+        }
+    });
+    // 3D: simulation (commands) or the real hand
+    connect(this, &AppCore::activeModeChanged, this, &AppCore::simulatingChanged);
+    connect(m_ctrl, &HandController::connectedChanged, this, &AppCore::simulatingChanged);
+    connect(m_player, &Player::outputChanged, this, &AppCore::simulatingChanged);
+    connect(m_gamepad, &GamepadInput::settingsChanged, this, &AppCore::simulatingChanged);
+    connect(m_gamepad, &GamepadInput::enabledChanged, this, &AppCore::simulatingChanged);
+    connect(m_stream, &StreamServer::settingsChanged, this, &AppCore::simulatingChanged);
 }
 
 AppCore::~AppCore() = default;
@@ -264,6 +280,9 @@ void AppCore::onPortConnection(int port)
 bool AppCore::toggleConnection()
 {
     if (m_ctrl->connected()) {
+        // Disconnect: stop what is streaming and bring every motor to duty 0 first
+        m_player->pause();
+        m_ctrl->stopAll();
         m_link->close();
         m_link2->close();
         return false;
@@ -494,6 +513,27 @@ void AppCore::setRefreshHz(double hz)
     m_refreshHz = hz;
     PlotItem::setRefreshHz(hz);
     emit refreshHzChanged();
+}
+
+bool AppCore::simulating() const
+{
+    if (!m_ctrl->connected())
+        return true;
+    if ((m_mode == QLatin1String("text") || m_mode == QLatin1String("timeline")) && !m_player->output())
+        return true;
+    if (m_mode == QLatin1String("controller") && m_gamepad->enabled() && !m_gamepad->output())
+        return true;
+    if (m_mode == QLatin1String("stream") && !m_stream->mirror())
+        return true;
+    return m_manualPreview;
+}
+
+void AppCore::setManualPreview(bool on)
+{
+    if (on == m_manualPreview)
+        return;
+    m_manualPreview = on;
+    emit simulatingChanged();
 }
 
 QString AppCore::runState() const
@@ -783,6 +823,7 @@ QJsonObject AppCore::collect() const
         {QStringLiteral("stopDeg"), m_calib->stopDeg()},
         {QStringLiteral("syncOnConnect"), m_calib->syncOnConnect()}});
     o.insert(QStringLiteral("refreshHz"), m_refreshHz);
+    o.insert(QStringLiteral("thumbKeys"), 2); // 2: T1 = thumb rotation, T2 = thumb flexion
     o.insert(QStringLiteral("board"), QJsonObject{{QStringLiteral("cells"), m_board->cells()}});
     o.insert(QStringLiteral("joints"), m_hand->toJson());
     o.insert(QStringLiteral("player"), QJsonObject{
@@ -880,6 +921,18 @@ void AppCore::apply(const QJsonObject &o)
         m_gamepad->setOutput(g.value(QStringLiteral("output")).toBool(m_gamepad->output()));
     }
     m_poses->fromJson(o.value(QStringLiteral("poses")).toArray());
+    // profiles before 0.5.1: T2 was named thumb rotation, T1 thumb flexion (hardware: T1 = rotation)
+    if (o.value(QStringLiteral("thumbKeys")).toInt(1) < 2) {
+        Joint *t2 = m_hand->joint(m_hand->indexOfKey(QStringLiteral("T2")));
+        Joint *t1 = m_hand->joint(m_hand->indexOfKey(QStringLiteral("T1")));
+        if (t2 && t2->name() == QLatin1String("Thumb Rotation"))
+            t2->setName(QStringLiteral("Thumb Flexion"));
+        if (t1 && t1->name() == QLatin1String("Thumb Flexion"))
+            t1->setName(QStringLiteral("Thumb Rotation"));
+        const int pinch = m_poses->find(QStringLiteral("Pinch"));
+        if (pinch >= 0 && m_poses->values(pinch) == QVariantList{70.0, 45.0, 50.0, 0.0, 0.0, 0.0})
+            m_poses->add(QStringLiteral("Pinch"), {45.0, 70.0, 50.0, 0.0, 0.0, 0.0});
+    }
     if (o.contains(QStringLiteral("timelineCustom")))
         m_timeline->customFromJson(o.value(QStringLiteral("timelineCustom")).toArray());
     m_macros->fromJson(o.value(QStringLiteral("macros")).toArray());

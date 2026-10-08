@@ -60,6 +60,9 @@ class AppCore : public QObject
     Q_PROPERTY(QString defaultCadFolder READ defaultCadFolder CONSTANT)
     Q_PROPERTY(double refreshHz READ refreshHz WRITE setRefreshHz NOTIFY refreshHzChanged)
     Q_PROPERTY(QString runState READ runState NOTIFY runStateChanged)
+    // 3D shows the commands instead of the real hand: not connected, or the active source
+    // is not sent (Timeline/Text Output off, Controller Output off, Stream without Mirror, Manual Output off)
+    Q_PROPERTY(bool simulating READ simulating NOTIFY simulatingChanged)
     Q_PROPERTY(bool firmwareConfigurable READ firmwareConfigurable NOTIFY firmwareConfigurableChanged)
     Q_PROPERTY(QString activeMode READ activeMode WRITE setActiveMode NOTIFY activeModeChanged)
     Q_PROPERTY(QVariantMap ui READ ui WRITE setUi NOTIFY uiChanged)
@@ -110,6 +113,9 @@ public:
     void setRefreshHz(double hz);
     // OFFLINE / IDLE / READY / RUN / FAULT for the big status light
     QString runState() const;
+    bool simulating() const;
+    // Manual Control window open with Output off
+    Q_INVOKABLE void setManualPreview(bool on);
     // firmware answered `i` with cnt90= (supports j / I / a)
     bool firmwareConfigurable() const { return m_fwConfigurable; }
     // push the over-current settings of the main joint to the firmware (`I`)
@@ -130,6 +136,7 @@ signals:
     void uiChanged();
     void refreshHzChanged();
     void runStateChanged();
+    void simulatingChanged();
     void firmwareConfigurableChanged();
 
 private:
@@ -195,4 +202,5 @@ private:
     QString m_mode = QStringLiteral("text");
     QVariantMap m_ui;
     QTimer m_compileTimer;
+    bool m_manualPreview = false;
 };

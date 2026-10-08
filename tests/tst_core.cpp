@@ -1,3 +1,4 @@
+#include <QSettings>
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
@@ -897,6 +898,70 @@ private slots:
         // the recording loads back as a trajectory
         Trajectory tr(core.hand());
         QVERIFY(tr.loadCsv(file));
+    }
+
+    void thumbKeysAndProfileMigration()
+    {
+        // hardware: T1 = thumb rotation, T2 = thumb flexion; old profiles had them the other way round
+        QTemporaryDir dir;
+        {
+            QFile f(dir.filePath(QStringLiteral("Default.json")));
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(R"({"joints":[{"key":"T2","name":"Thumb Rotation"},{"key":"T1","name":"Thumb Flexion"},
+                                  {"key":"I","name":"Index"}],
+                       "poses":[{"name":"Pinch","q":[70,45,50,0,0,0]}]})");
+        }
+        QSettings().remove(QStringLiteral("lastProfile"));
+        AppCore core(dir.path());
+        HandModel *hand = core.hand();
+        QCOMPARE(hand->joint(hand->indexOfKey(QStringLiteral("T1")))->name(), QStringLiteral("Thumb Rotation"));
+        QCOMPARE(hand->joint(hand->indexOfKey(QStringLiteral("T2")))->name(), QStringLiteral("Thumb Flexion"));
+        const int pinch = core.poses()->find(QStringLiteral("Pinch"));
+        QCOMPARE(core.poses()->values(pinch), (QVariantList{45.0, 70.0, 50.0, 0.0, 0.0, 0.0}));
+        // fresh model defaults
+        HandModel fresh;
+        QCOMPARE(fresh.joint(0)->key(), QStringLiteral("T2"));
+        QCOMPARE(fresh.joint(0)->name(), QStringLiteral("Thumb Flexion"));
+        QCOMPARE(fresh.joint(1)->name(), QStringLiteral("Thumb Rotation"));
+    }
+
+    void disconnectStopsMotors()
+    {
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        SerialLink *link = core.link();
+        // bench board (no MCU layout): duty 0, driver off
+        link->openVirtual();
+        link->clearVirtualSent();
+        QVERIFY(!core.toggleConnection());
+        QCOMPARE(link->virtualSent(), (QStringList{QStringLiteral("0"), QStringLiteral("d")}));
+        QVERIFY(!core.ctrl()->connected());
+        // MCB G474: D = every motor off
+        link->openVirtual();
+        link->injectLine(QStringLiteral("ID: CyberHand-G474 fw 0.8-g474 joints=6 cnt90=7000 mcu=U6 motor=1(I) keys=I,T1,T2,M,R,P link=U7"));
+        link->clearVirtualSent();
+        core.toggleConnection();
+        QCOMPARE(link->virtualSent(), QStringList{QStringLiteral("D")});
+    }
+
+    void simulationWhileConnected()
+    {
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        QVERIFY(core.simulating()); // not connected
+        core.link()->openVirtual();
+        core.setActiveMode(QStringLiteral("timeline"));
+        core.player()->setOutput(true);
+        QVERIFY(!core.simulating());
+        QSignalSpy spy(&core, &AppCore::simulatingChanged);
+        core.player()->setOutput(false); // Output off: the 3D follows the commands
+        QVERIFY(core.simulating());
+        QVERIFY(spy.count() >= 1);
+        core.player()->setOutput(true);
+        core.setManualPreview(true);
+        QVERIFY(core.simulating());
+        core.setManualPreview(false);
+        QVERIFY(!core.simulating());
     }
 
     void llmExtract()

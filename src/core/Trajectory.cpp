@@ -305,7 +305,7 @@ void Trajectory::makeDemo(int kind)
                 else if (t < 4.0) a = 1;
                 else if (t < 5.6) a = 0.5 + 0.5 * qCos(M_PI * (t - 4.0) / 1.6);
                 else a = 0;
-                const double target = (j == 0) ? maxOf(j) * 0.7 : maxOf(j);
+                const double target = (j == 1) ? maxOf(j) * 0.7 : maxOf(j); // T1 thumb rotation
                 vals[j] << a * target;
             }
         }

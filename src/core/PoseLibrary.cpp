@@ -115,7 +115,7 @@ void PoseLibrary::resetDefaults()
     m_poses.append({QStringLiteral("Open"), {0, 0, 0, 0, 0, 0}});
     m_poses.append({QStringLiteral("Fist"), {60, 60, 90, 90, 90, 90}});
     m_poses.append({QStringLiteral("Point"), {60, 60, 0, 90, 90, 90}});
-    m_poses.append({QStringLiteral("Pinch"), {70, 45, 50, 0, 0, 0}});
+    m_poses.append({QStringLiteral("Pinch"), {45, 70, 50, 0, 0, 0}}); // T2 flex 45, T1 rotate 70
     m_poses.append({QStringLiteral("Peace"), {60, 60, 0, 0, 90, 90}});
     endResetModel();
     emit countChanged();

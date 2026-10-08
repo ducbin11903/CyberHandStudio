@@ -227,8 +227,8 @@ void GamepadInput::resetMapping()
         e.pose.clear();
         e.command.clear();
     }
-    set("LX", Motion, 0);                              // thumb rotation
-    set("LY", Motion, 1);                              // thumb flexion
+    set("LX", Motion, 1);                              // thumb rotation (T1)
+    set("LY", Motion, 0);                              // thumb flexion (T2)
     set("LS", Pose, 0, QStringLiteral("Open"));
     set("RX", Motion, 2);                              // index
     set("RY", Motion, 3);                              // middle

@@ -17,6 +17,9 @@ ToolWindow {
 
     property bool live: true
     property bool output: true
+    // Output off while the window is open: the 3D follows the sliders (simulation)
+    readonly property bool preview: visible && !output
+    onPreviewChanged: Core.setManualPreview(preview)
     readonly property var joints: Core.hand.joints
     // joints no open port drives (other MCU not connected / link lost)
     readonly property var offKeys: {

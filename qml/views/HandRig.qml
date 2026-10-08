@@ -2,7 +2,7 @@ import QtQuick
 import QtQuick3D
 
 // Right hand seen from the back: thumb on the left (-X), fingers along +Y, palm faces -Z.
-// angles = [T2 thumb rotation, T1 thumb flexion, I, M, R, P] in degrees.
+// angles = [T2 thumb flexion, T1 thumb rotation, I, M, R, P] in degrees.
 Node {
     id: root
     property var angles: [0, 0, 0, 0, 0, 0]
@@ -65,25 +65,25 @@ Node {
     Finger { x: 9;   y: 90; angle: root.a(4); k: 1.02; material: skin; jointMaterial: jointMat }
     Finger { x: 27;  y: 85; angle: root.a(5); k: 0.84; width: 14; material: skin; jointMaterial: jointMat }
 
-    // thumb: T2 swings it across the palm (opposition), T1 curls it.
+    // thumb: T1 swings it across the palm (opposition), T2 curls it.
     // Coefficients fitted so that the "Pinch" pose brings the thumb tip to the index tip.
     Node {
         position: Qt.vector3d(-33.5, 38, -14)
-        eulerRotation: Qt.vector3d(root.a(0) * 0.80, -root.a(0) * 1.95, 39.2 - root.a(0) * 0.18)
+        eulerRotation: Qt.vector3d(root.a(1) * 0.80, -root.a(1) * 1.95, 39.2 - root.a(1) * 0.18)
         Segment {
             length: 34; w: 18; h: 16
             material: skin; jointMaterial: jointMat
         }
         Node {
             y: 34
-            eulerRotation: Qt.vector3d(-root.a(1) * 0.97, 0, root.a(1) * 0.57)
+            eulerRotation: Qt.vector3d(-root.a(0) * 0.97, 0, root.a(0) * 0.57)
             Segment {
                 length: 28; w: 16; h: 14
                 material: skin; jointMaterial: jointMat
             }
             Node {
                 y: 28
-                eulerRotation: Qt.vector3d(root.a(1) * 0.19, 0, -root.a(1) * 0.54)
+                eulerRotation: Qt.vector3d(root.a(0) * 0.19, 0, -root.a(0) * 0.54)
                 Segment {
                     length: 24; w: 15; h: 13; tip: true
                     material: skin; jointMaterial: jointMat

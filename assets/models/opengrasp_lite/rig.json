@@ -376,7 +376,7 @@
    "follower": "P_cd"
   },
   {
-   "key": "T2",
+   "key": "T1",
    "type": "revolute",
    "axis": [
     -0.342,
@@ -396,9 +396,9 @@
    ]
   },
   {
-   "key": "T1",
+   "key": "T2",
    "type": "fourbar",
-   "parent": "T2",
+   "parent": "T1",
    "axis": [
     0.915,
     0.2278,

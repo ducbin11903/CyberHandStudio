@@ -32,7 +32,7 @@ Mỗi MCU điều khiển 3 khớp và có 1 cổng USB CDC riêng:
 
 | MCU | motor 1 | motor 2 | motor 3 |
 |---|---|---|---|
-| U6 | I | T1 | T2 |
+| U6 | I | T1 (Thumb Rotation) | T2 (Thumb Flexion) |
 | U7 | M | R | P |
 
 ID (lệnh `i`, firmware tự in khi mở cổng):
