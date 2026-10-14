@@ -81,6 +81,14 @@ set_target_properties(CyberHandStudio PROPERTIES
 
 install(TARGETS CyberHandStudio RUNTIME DESTINATION .)
 
+# Waveshare USB-CAN-FD driver library (x64), loaded at run time from next to the exe
+if (WIN32 AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(CH_CANFD_DLL ${CMAKE_CURRENT_SOURCE_DIR}/third_party/waveshare/ControlCANFD.dll)
+    add_custom_command(TARGET CyberHandStudio POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CH_CANFD_DLL} $<TARGET_FILE_DIR:CyberHandStudio>)
+    install(FILES ${CH_CANFD_DLL} DESTINATION .)
+endif()
+
 # ---- unit tests ----
 option(CH_BUILD_TESTS "Build unit tests" ON)
 if (CH_BUILD_TESTS)

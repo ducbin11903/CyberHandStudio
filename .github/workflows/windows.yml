@@ -49,6 +49,7 @@ jobs:
         run: |
           mkdir -p dist
           cp build/CyberHandStudio.exe dist/
+          cp third_party/waveshare/ControlCANFD.dll dist/
           windeployqt6 --release --no-translations --qmldir qml --dir dist dist/CyberHandStudio.exe
           # copy every non-Qt DLL the exe and plugins need from the UCRT64 prefix
           for pass in 1 2 3 4 5 6; do

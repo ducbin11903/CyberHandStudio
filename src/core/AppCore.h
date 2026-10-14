@@ -137,7 +137,6 @@ public:
     Q_INVOKABLE void setUiValue(const QString &key, const QVariant &value);
     Q_INVOKABLE QVariant uiValue(const QString &key, const QVariant &fallback = QVariant()) const;
     Q_INVOKABLE QString fileName(const QString &pathOrUrl) const;
-    Q_INVOKABLE QString localPath(const QString &pathOrUrl) const;
     Q_INVOKABLE void saveNow() { m_config->save(); }
 
 signals:

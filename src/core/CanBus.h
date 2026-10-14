@@ -143,7 +143,6 @@ class CanBus : public QObject
     Q_PROPERTY(int arbBaud READ arbBaud WRITE setArbBaud NOTIFY settingsChanged)
     Q_PROPERTY(int dataBaud READ dataBaud WRITE setDataBaud NOTIFY settingsChanged)
     Q_PROPERTY(bool termination READ termination WRITE setTermination NOTIFY settingsChanged)
-    Q_PROPERTY(QString dllPath READ dllPath WRITE setDllPath NOTIFY settingsChanged)
     Q_PROPERTY(QString udpHost READ udpHost WRITE setUdpHost NOTIFY settingsChanged)
     Q_PROPERTY(int udpPort READ udpPort WRITE setUdpPort NOTIFY settingsChanged)
     Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
@@ -179,8 +178,6 @@ public:
     void setDataBaud(int b);
     bool termination() const { return m_cfg.termination; }
     void setTermination(bool on);
-    QString dllPath() const { return m_cfg.dllPath; }
-    void setDllPath(const QString &p);
     QString udpHost() const { return m_cfg.udpHost; }
     void setUdpHost(const QString &h);
     int udpPort() const { return m_cfg.udpPort; }

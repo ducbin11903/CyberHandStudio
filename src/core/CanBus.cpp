@@ -464,16 +464,6 @@ void CanBus::setTermination(bool on)
     emit settingsChanged();
 }
 
-void CanBus::setDllPath(const QString &p)
-{
-    const QUrl u(p);
-    const QString path = u.isLocalFile() ? u.toLocalFile() : p;
-    if (path == m_cfg.dllPath)
-        return;
-    m_cfg.dllPath = path;
-    emit settingsChanged();
-}
-
 void CanBus::setUdpHost(const QString &h)
 {
     if (h == m_cfg.udpHost)

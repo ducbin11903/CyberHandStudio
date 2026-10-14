@@ -202,7 +202,7 @@ public:
     bool open(const CanConfig &cfg, QString *error) override
     {
         m_cfg = cfg;
-        if (!load(cfg.dllPath, error))
+        if (!load(error))
             return false;
         m_dev = m_open(ws::DeviceType, ws::UINT(cfg.device), 0);
         if (!m_dev) {
@@ -369,26 +369,15 @@ public:
     }
 
 private:
-    bool load(const QString &path, QString *error)
+    bool load(QString *error)
     {
         if (m_lib.isLoaded())
             return true;
-        QStringList candidates;
-        if (!path.isEmpty())
-            candidates << path;
-        const QString app = QCoreApplication::applicationDirPath();
-        candidates << app + QStringLiteral("/ControlCANFD.dll") << app + QStringLiteral("/drivers/ControlCANFD.dll")
-                   << QStringLiteral("ControlCANFD");
-        QString last;
-        for (const QString &c : candidates) {
-            m_lib.setFileName(c);
-            if (m_lib.load())
-                break;
-            last = m_lib.errorString();
-        }
-        if (!m_lib.isLoaded()) {
-            *error = QStringLiteral("Không nạp được ControlCANFD.dll (bản x64): chép x64/ControlCANFD.dll cạnh CyberHandStudio.exe "
-                                    "hoặc chọn đường dẫn trong Communication. %1").arg(last);
+        // shipped next to CyberHandStudio.exe (third_party/waveshare, x64)
+        m_lib.setFileName(QCoreApplication::applicationDirPath() + QStringLiteral("/ControlCANFD.dll"));
+        if (!m_lib.load()) {
+            *error = QStringLiteral("Không nạp được ControlCANFD.dll cạnh CyberHandStudio.exe "
+                                    "(bản Windows x64 có sẵn file này; giải nén lại đủ file). %1").arg(m_lib.errorString());
             return false;
         }
         auto get = [this](const char *name) { return m_lib.resolve(name); };

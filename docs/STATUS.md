@@ -63,6 +63,7 @@ Cập nhật: 2026-09-27
   STATUS → dòng log USB (Telemetry, Board), E-STOP 0x000 (nút ■ + Esc), `i` + `canlog 50` khi kết nối.
 - Mode CAN monitor. fw_sim `--can-udp`. Test: giải mã STATUS (thiếu cảm biến), POS_ALL 0x7FFF, TEXT nhiều khung, đếm mất seq,
   cả tay qua bus ảo.
+- `ControlCANFD.dll` (x64) kèm sẵn cạnh exe (`third_party/waveshare/`), không còn ô chọn đường dẫn DLL.
 - Chưa thử với adapter thật.
 
 ## Giả định cần Duc xác nhận

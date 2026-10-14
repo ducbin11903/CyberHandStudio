@@ -190,8 +190,8 @@ Khung FD chỉ có độ dài 0–8, 12, 16, 20, 24, 32, 48, 64: phần thiếu 
 - Adapter "Waveshare USB-CAN-FD": thiết bị (mặc định 0), kênh CAN1/CAN2, bitrate trọng tài / dữ liệu,
   "Điện trở 120 Ω — bật trên adapter" (`ZCAN_SetResistanceEnable`, mặc định bật: cùng 120 Ω phía MCB thành 60 Ω cho bus 2 đầu;
   tắt nếu bus đã có 2 điện trở).
-  Cần `ControlCANFD.dll` **bản x64** (gói *USB-CAN-FD Library* của Waveshare, thư mục `x64/`): chép cạnh
-  `CyberHandStudio.exe`, hoặc vào `drivers\`, hoặc chọn file ở ô ControlCANFD.dll. Bản x86 không nạp được vào app 64-bit.
+  `ControlCANFD.dll` (x64, gói *USB-CAN-FD Library* của Waveshare) có sẵn trong bản build, cạnh `CyberHandStudio.exe`
+  (nguồn trong repo: `third_party/waveshare/`).
 - Khi Connect: gửi `i` và `canlog 50` tới từng node, chờ ID của cả hai (2 dòng trạng thái U6 / U7 như chế độ 2 cổng).
 - STATUS → dòng log kiểu USB (`en,duty,out,i_mA,flt,diag,pos,tgt,mode` của khớp chính, `qN,tN,iN`, `temp,rh,vbat`)
   → cùng đường Telemetry / Live / Board như USB. Log rate (Settings) gửi `canlog <hz>`.

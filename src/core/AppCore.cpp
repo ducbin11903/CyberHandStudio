@@ -803,11 +803,6 @@ QVariant AppCore::uiValue(const QString &key, const QVariant &fallback) const
     return m_ui.value(key, fallback);
 }
 
-QString AppCore::localPath(const QString &pathOrUrl) const
-{
-    return QDir::toNativeSeparators(Trajectory::localPath(pathOrUrl));
-}
-
 QString AppCore::fileName(const QString &pathOrUrl) const
 {
     return QFileInfo(Trajectory::localPath(pathOrUrl)).fileName();
@@ -884,7 +879,6 @@ QJsonObject AppCore::collect() const
                                                  {QStringLiteral("arbBaud"), cc.arbBaud},
                                                  {QStringLiteral("dataBaud"), cc.dataBaud},
                                                  {QStringLiteral("termination"), cc.termination},
-                                                 {QStringLiteral("dllPath"), cc.dllPath},
                                                  {QStringLiteral("udpHost"), cc.udpHost},
                                                  {QStringLiteral("udpPort"), cc.udpPort}});
     o.insert(QStringLiteral("control"), QJsonObject{
@@ -958,7 +952,6 @@ void AppCore::apply(const QJsonObject &o)
         cc.arbBaud = cj.value(QStringLiteral("arbBaud")).toInt(cc.arbBaud);
         cc.dataBaud = cj.value(QStringLiteral("dataBaud")).toInt(cc.dataBaud);
         cc.termination = cj.value(QStringLiteral("termination")).toBool(cc.termination);
-        cc.dllPath = cj.value(QStringLiteral("dllPath")).toString();
         cc.udpHost = cj.value(QStringLiteral("udpHost")).toString(cc.udpHost);
         cc.udpPort = cj.value(QStringLiteral("udpPort")).toInt(cc.udpPort);
         m_can->setConfig(cc);

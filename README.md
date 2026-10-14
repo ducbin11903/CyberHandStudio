@@ -32,7 +32,7 @@ Mọi thao tác quy về lệnh CLI hiện có của firmware (`e d x o g p t v 
   (fw 0.8, 1 cổng điều khiển cả 6 khớp qua link UART). Cảm biến bo mạch (fw 0.9): `--temp`, `--vbat`, lệnh
   `simtemp <C>` / `simvbat <V>` / `simsht off|on`. Xem docs/PROTOCOL.md.
 - CAN (fw 0.11): `python tools/fw_sim.py --can-udp 7470`, app: Communication → Kết nối → CAN → adapter "Ảo (UDP)" → Connect.
-  Adapter thật Waveshare USB-CAN-FD: chép `x64/ControlCANFD.dll` cạnh `CyberHandStudio.exe`.
+  Adapter thật Waveshare USB-CAN-FD: `ControlCANFD.dll` đã kèm trong bản build.
 - Stream: `python tools/stream_demo.py` rồi vào Stream → Start.
 
 ## Build

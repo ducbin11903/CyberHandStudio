@@ -17,7 +17,6 @@ struct CanConfig {
     int arbBaud = 1000000;   // arbitration phase, bit/s
     int dataBaud = 2000000;  // data phase (BRS), bit/s
     bool termination = true; // adapter's own 120 ohm (ZCAN_SetResistanceEnable); with the MCB end = 60 ohm bus
-    QString dllPath;         // "" = ControlCANFD.dll next to the app
     // virtual bus: fw_sim --can-udp <port>
     QString udpHost = QStringLiteral("127.0.0.1");
     int udpPort = 7470;

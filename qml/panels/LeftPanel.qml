@@ -94,12 +94,6 @@ Card {
     readonly property bool canMode: Core.ctrl.connectionMode === 2
 
     TextPrompt { id: prompt }
-    FileDialog {
-        id: dllDialog
-        title: qsTr("ControlCANFD.dll (Waveshare USB-CAN-FD, bản x64)")
-        nameFilters: ["ControlCANFD.dll (*.dll)"]
-        onAccepted: Core.can.dllPath = Core.localPath(selectedFile.toString())
-    }
     FolderDialog {
         id: cadDialog
         title: qsTr("Thư mục mô hình 3D (rig.json)")
@@ -262,17 +256,6 @@ Card {
                                 onToggled: Core.can.termination = checked
                             }
                             Item { Layout.fillWidth: true }
-                        }
-                        FormRow {
-                            visible: Core.can.backend === 0
-                            label: qsTr("ControlCANFD.dll")
-                            FlatField {
-                                Layout.fillWidth: true
-                                text: Core.can.dllPath
-                                placeholderText: qsTr("cạnh CyberHandStudio.exe")
-                                onEditingFinished: Core.can.dllPath = text.trim()
-                            }
-                            IconButton { iconPath: Icons.folder; tip: qsTr("Chọn ControlCANFD.dll (bản x64)"); onClicked: dllDialog.open() }
                         }
                         FormRow {
                             visible: Core.can.backend === 1
