@@ -59,6 +59,19 @@ ApplicationWindow {
                 IconButton { iconPath: Icons.table; tip: qsTr("Data Monitor"); checked: dataWin.visible; onClicked: dataWin.toggle() }
                 Rectangle { Layout.preferredWidth: 22; Layout.preferredHeight: 1; Layout.alignment: Qt.AlignHCenter; color: Theme.divider }
                 IconButton {
+                    iconPath: Icons.download
+                    tip: Core.updater.available ? qsTr("Có bản mới — Cập nhật") : qsTr("Cập nhật phần mềm")
+                    onClicked: updateDlg.openAndCheck()
+                    Rectangle {
+                        visible: Core.updater.available
+                        width: 7; height: 7; radius: 3.5
+                        color: Theme.accentGreen
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        anchors.margins: 3
+                    }
+                }
+                IconButton {
                     iconPath: Icons.settings
                     tip: qsTr("Mở thư mục cấu hình")
                     onClicked: Core.config.openFolder()
@@ -70,6 +83,55 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: Theme.gap
+
+            // ---- update: a newer build on GitHub / result after the restart ----------
+            Rectangle {
+                id: updBanner
+                property bool dismissed: false
+                readonly property bool after: Core.updater.startMessage.length > 0
+                visible: after || (Core.updater.available && !dismissed)
+                Layout.fillWidth: true
+                Layout.preferredHeight: 34
+                radius: Theme.radius
+                color: after && Core.updater.startFailed ? Theme.liveRed : Theme.barFill
+                Timer {
+                    running: updBanner.after && !Core.updater.startFailed
+                    interval: 10000
+                    onTriggered: Core.updater.clearStartMessage()
+                }
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 8
+                    spacing: 10
+                    Icon {
+                        Layout.preferredWidth: 18
+                        Layout.preferredHeight: 18
+                        path: updBanner.after ? (Core.updater.startFailed ? Icons.alert : Icons.check) : Icons.download
+                        color: Theme.textStrong
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: updBanner.after ? Core.updater.startMessage : qsTr("Có bản mới: %1").arg(Core.updater.latestText)
+                        color: Theme.textStrong
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize + 1
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                    FlatButton {
+                        visible: !updBanner.after
+                        text: qsTr("Cập nhật")
+                        iconPath: Icons.download
+                        onClicked: updateDlg.openAndCheck()
+                    }
+                    IconButton {
+                        iconPath: Icons.close
+                        tip: qsTr("Ẩn")
+                        onClicked: updBanner.after ? Core.updater.clearStartMessage() : (updBanner.dismissed = true)
+                    }
+                }
+            }
 
             // ---- board protection banner (firmware switched all motors off) -----
             Repeater {
@@ -164,6 +226,7 @@ ApplicationWindow {
     ManualControlWindow { id: manualWin; transientParent: null }
     CalibrationWindow { id: calibWin; transientParent: null }
     DataMonitorWindow { id: dataWin; transientParent: null }
+    UpdateDialog { id: updateDlg }
     // for --eval in screenshots / tests
     function openTool(name) {
         if (name === "manual") manualWin.show()

@@ -24,6 +24,7 @@
 #include "core/Telemetry.h"
 #include "core/TimelineModel.h"
 #include "core/Trajectory.h"
+#include "core/Updater.h"
 
 class TstCore : public QObject
 {
@@ -1231,6 +1232,106 @@ private slots:
         QCOMPARE(sentAs(0x200), QStringList{QStringLiteral("D")});
         QVERIFY(!ctrl->connected());
         QVERIFY(!bus->connected());
+    }
+
+    void updaterInfoAndNotes()
+    {
+        const QByteArray json = R"({"version":"0.7.0","build":61,"commit":"def5678aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "date":"2026-10-15T03:22:00Z","zip":"CyberHandStudio-win64.zip","sha256":"ABCD","size":123,
+            "log":[{"commit":"def5678aaaa","subject":"Updater"},{"commit":"bbb2222bbbb","subject":"CAN fix"},
+                   {"commit":"abc1234cccc","subject":"0.6.0 CAN"},{"commit":"9990000dddd","subject":"older"}]})";
+        UpdateInfo i;
+        QVERIFY(Updater::parseInfo(json, &i));
+        QCOMPARE(i.build, 61);
+        QCOMPARE(i.sha256, QStringLiteral("abcd"));
+        QVERIFY(i.zipUrl.endsWith(QStringLiteral("/releases/download/latest/CyberHandStudio-win64.zip")));
+        QCOMPARE(i.log.size(), 4);
+        // newer only for a CI build with a lower number and another commit
+        QVERIFY(Updater::isNewer(i, 58, QStringLiteral("abc1234cccc")));
+        QVERIFY(!Updater::isNewer(i, 61, QStringLiteral("def5678aaaa")));
+        QVERIFY(!Updater::isNewer(i, 58, QStringLiteral("def5678")));      // same commit
+        QVERIFY(!Updater::isNewer(i, 0, QString()));                        // dev build
+        QVERIFY(!Updater::isNewer(i, 70, QStringLiteral("eee")));           // already newer
+        // notes: what came after the running commit
+        QCOMPARE(Updater::notesSince(i, QStringLiteral("abc1234")),
+                 (QStringList{QStringLiteral("def5678  Updater"), QStringLiteral("bbb2222  CAN fix")}));
+        QCOMPARE(Updater::notesSince(i, QStringLiteral("0000000"), 2),
+                 (QStringList{QStringLiteral("def5678  Updater"), QStringLiteral("bbb2222  CAN fix"), QStringLiteral("…")}));
+        UpdateInfo bad;
+        QVERIFY(!Updater::parseInfo("{\"version\":\"1\"}", &bad));
+        QVERIFY(!Updater::parseInfo("not json", &bad));
+        // the copy script keeps its parameters and the robocopy success rule
+        const QString ps = Updater::scriptText();
+        QVERIFY(ps.contains(QStringLiteral("param([int]$ProcId, [string]$Stage, [string]$Dest, [string]$Log)")));
+        QVERIFY(ps.contains(QStringLiteral("$code -lt 8")));
+        QVERIFY(ps.contains(QStringLiteral("'--updated'")));
+        for (QChar c : ps)
+            QVERIFY(c.unicode() < 128);
+    }
+
+    void updaterDownloadExtract()
+    {
+        if (QStandardPaths::findExecutable(QStringLiteral("unzip")).isEmpty()
+            || QStandardPaths::findExecutable(QStringLiteral("zip")).isEmpty())
+            QSKIP("zip / unzip not installed");
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        // a release folder: zip with CyberHandStudio.exe + version.json (sha256, size)
+        QDir(dir.path()).mkpath(QStringLiteral("pkg/qml"));
+        auto put = [&](const QString &rel, const QByteArray &d) {
+            QFile f(dir.path() + QStringLiteral("/pkg/") + rel);
+            QVERIFY(f.open(QIODevice::WriteOnly));
+            f.write(d);
+        };
+        put(QStringLiteral("CyberHandStudio.exe"), QByteArray(5000, 'x'));
+        put(QStringLiteral("qml/a.qml"), "Item {}");
+        QProcess zip;
+        zip.setWorkingDirectory(dir.path() + QStringLiteral("/pkg"));
+        zip.start(QStringLiteral("zip"), {QStringLiteral("-qr"), dir.path() + QStringLiteral("/CyberHandStudio-win64.zip"), QStringLiteral(".")});
+        QVERIFY(zip.waitForFinished(20000));
+        QFile z(dir.path() + QStringLiteral("/CyberHandStudio-win64.zip"));
+        QVERIFY(z.open(QIODevice::ReadOnly));
+        const QByteArray zipData = z.readAll();
+        const QString sha = QString::fromLatin1(QCryptographicHash::hash(zipData, QCryptographicHash::Sha256).toHex());
+        auto writeInfo = [&](const QString &shaField) {
+            QFile v(dir.path() + QStringLiteral("/version.json"));
+            QVERIFY(v.open(QIODevice::WriteOnly | QIODevice::Truncate));
+            v.write(QStringLiteral(R"({"version":"9.9.9","build":99,"commit":"feedbeef00","date":"2026-10-15T00:00:00Z",)"
+                                   R"("zip":"CyberHandStudio-win64.zip","sha256":"%1","size":%2,"log":[{"commit":"feedbeef00","subject":"new"}]})")
+                        .arg(shaField).arg(zipData.size()).toUtf8());
+        };
+        writeInfo(sha);
+        qputenv("CH_UPDATE_URL", QUrl::fromLocalFile(dir.path() + QLatin1Char('/')).toString().toUtf8());
+        Updater::setTestBuild(50, QStringLiteral("abcabc0"));
+
+        Updater up;
+        up.check();
+        QTRY_COMPARE_WITH_TIMEOUT(up.state(), int(Updater::Available), 5000);
+        QVERIFY(up.available());
+        QCOMPARE(up.notes(), QStringList{QStringLiteral("feedbee  new")});
+        up.download();
+        QTRY_COMPARE_WITH_TIMEOUT(up.state(), int(Updater::Ready), 20000);
+        const QString stage = Updater::workDir() + QStringLiteral("/stage");
+        QVERIFY(QFileInfo::exists(stage + QStringLiteral("/CyberHandStudio.exe")));
+        QVERIFY(QFileInfo::exists(stage + QStringLiteral("/qml/a.qml")));
+
+        // wrong checksum: refused, nothing extracted
+        writeInfo(QStringLiteral("00"));
+        Updater up2;
+        up2.check();
+        QTRY_COMPARE_WITH_TIMEOUT(up2.state(), int(Updater::Available), 5000);
+        up2.download();
+        QTRY_COMPARE_WITH_TIMEOUT(up2.state(), int(Updater::Error), 20000);
+        QVERIFY(up2.errorString().contains(QStringLiteral("sha256")));
+
+        // already up to date
+        Updater::setTestBuild(99, QStringLiteral("feedbeef00"));
+        Updater up3;
+        up3.check();
+        QTRY_COMPARE_WITH_TIMEOUT(up3.state(), int(Updater::UpToDate), 5000);
+        QDir(Updater::workDir()).removeRecursively();
+        qunsetenv("CH_UPDATE_URL");
+        Updater::setTestBuild(-1, QString());
     }
 
     void llmExtract()

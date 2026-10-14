@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(CyberHandStudio VERSION 0.6.0 LANGUAGES CXX)
+project(CyberHandStudio VERSION 0.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,6 +28,11 @@ target_link_libraries(chcore PUBLIC
 target_compile_definitions(chcore PUBLIC CH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_compile_definitions(chcore PUBLIC
     CH_VERSION="${PROJECT_VERSION}")
+# CI build number + commit: the in-app updater compares them with the "latest" release (0 = dev build)
+set(CH_BUILD_NUMBER 0 CACHE STRING "CI build number (0 = local build)")
+set(CH_COMMIT "" CACHE STRING "git commit of this build")
+set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/src/core/Updater.cpp PROPERTIES
+    COMPILE_DEFINITIONS "CH_BUILD=${CH_BUILD_NUMBER};CH_COMMIT=\"${CH_COMMIT}\"")
 
 if (SDL2_FOUND)
     message(STATUS "SDL2 found: gamepad support enabled")

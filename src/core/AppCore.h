@@ -9,6 +9,7 @@
 #include "BoardMonitor.h"
 #include "CadModel.h"
 #include "CanBus.h"
+#include "Updater.h"
 #include "Calibration.h"
 #include "ConfigStore.h"
 #include "ConsoleModel.h"
@@ -38,6 +39,7 @@ class AppCore : public QObject
     Q_PROPERTY(SerialLink *link2 READ link2 CONSTANT)
     // CAN connection (Waveshare USB-CAN-FD / UDP virtual bus), MCB CAN v1
     Q_PROPERTY(CanBus *can READ can CONSTANT)
+    Q_PROPERTY(Updater *updater READ updater CONSTANT)
     Q_PROPERTY(ConsoleModel *console READ console CONSTANT)
     Q_PROPERTY(HandModel *hand READ hand CONSTANT)
     Q_PROPERTY(Telemetry *telemetry READ telemetry CONSTANT)
@@ -84,6 +86,7 @@ public:
     SerialLink *link() const { return m_link; }
     SerialLink *link2() const { return m_link2; }
     CanBus *can() const { return m_can; }
+    Updater *updater() const { return m_updater; }
     // "udp", "udp:7470", "udp:127.0.0.1:7470", "waveshare", "waveshare:0" (command line --can)
     void openCanAtStart(const QString &spec);
     // E-STOP: stop playback, CAN frame 0x000 (USB: D / 0 + d on every port)
@@ -169,6 +172,7 @@ private:
     SerialLink *m_link;
     SerialLink *m_link2;
     CanBus *m_can;
+    Updater *m_updater;
     // a connection session is open (first port up .. last port down)
     bool m_session = false;
     ConsoleModel *m_console;

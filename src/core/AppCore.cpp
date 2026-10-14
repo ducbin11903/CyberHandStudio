@@ -27,6 +27,7 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_ctrl = new HandController(m_link, m_console, m_hand, this);
     m_ctrl->addLink(m_link2);
     m_can = new CanBus(this);
+    m_updater = new Updater(this);
     m_ctrl->setCan(m_can);
     m_live = new LiveSeries(this);
     m_streamSeries = new LiveSeries(this);
@@ -202,8 +203,15 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
             m_ctrl->stopAll();
             m_link->close();
             m_link2->close();
+            m_can->close();
         }
     });
+    // updates: console line when a new build is found; silent check shortly after start (release builds)
+    connect(m_updater, &Updater::message, this, [this](const QString &t, bool err) {
+        err ? m_console->error(t) : m_console->info(t);
+    });
+    if (m_updater->canInstall() && m_updater->autoCheck())
+        QTimer::singleShot(4000, m_updater, [this]() { m_updater->check(true); });
     // 3D: simulation (commands) or the real hand
     connect(this, &AppCore::activeModeChanged, this, &AppCore::simulatingChanged);
     connect(m_ctrl, &HandController::connectedChanged, this, &AppCore::simulatingChanged);
@@ -225,6 +233,7 @@ void AppCore::registerQmlTypes()
     qmlRegisterUncreatableType<SerialLink>(uri, 1, 0, "SerialLink", why);
     qmlRegisterUncreatableType<CanBus>(uri, 1, 0, "CanBus", why);
     qmlRegisterUncreatableType<CanFrameLog>(uri, 1, 0, "CanFrameLog", why);
+    qmlRegisterUncreatableType<Updater>(uri, 1, 0, "Updater", why);
     qmlRegisterUncreatableType<ConsoleModel>(uri, 1, 0, "ConsoleModel", why);
     qmlRegisterUncreatableType<HandModel>(uri, 1, 0, "HandModel", why);
     qmlRegisterUncreatableType<Joint>(uri, 1, 0, "Joint", why);

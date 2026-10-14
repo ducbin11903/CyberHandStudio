@@ -13,6 +13,7 @@
 #include <QDebug>
 
 #include "core/AppCore.h"
+#include "core/Updater.h"
 
 static void loadFonts()
 {
@@ -59,11 +60,29 @@ int main(int argc, char *argv[])
     QCommandLineOption scriptOpt(QStringLiteral("run-macro"), QStringLiteral("Run this macro text at start (lines separated by ;)"), QStringLiteral("text"));
     QCommandLineOption playOpt(QStringLiteral("play"), QStringLiteral("Load a trajectory CSV and play it"), QStringLiteral("file"));
     QCommandLineOption evalOpt(QStringLiteral("eval"), QStringLiteral("Evaluate a QML/JS expression after start (repeatable), e.g. \"Core.stream.start()\""), QStringLiteral("js"));
-    args.addOptions({portOpt, port2Opt, canOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt});
+    // in-app update: the copy script restarts the app with --updated / --update-failed
+    QCommandLineOption updatedOpt(QStringLiteral("updated"), QStringLiteral("Started by the updater after a successful update"));
+    QCommandLineOption updateFailedOpt(QStringLiteral("update-failed"), QStringLiteral("Started by the updater after a failed update"));
+    QCommandLineOption installUpdateOpt(QStringLiteral("install-update"), QStringLiteral("Install this CyberHandStudio-win64.zip over the app folder and restart (Windows)"), QStringLiteral("zip"));
+    args.addOptions({portOpt, port2Opt, canOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt,
+                     updatedOpt, updateFailedOpt, installUpdateOpt});
     args.process(app);
+
+    if (args.isSet(installUpdateOpt)) {
+        Updater up;
+        QString err;
+        if (!up.installZipNow(args.value(installUpdateOpt), &err)) {
+            qCritical().noquote() << "install-update:" << err;
+            return 2;
+        }
+        qInfo().noquote() << "install-update: script started, exiting";
+        return 0;
+    }
 
     AppCore core(args.value(configDirOpt));
     core.registerQmlTypes();
+    if (args.isSet(updatedOpt) || args.isSet(updateFailedOpt))
+        core.updater()->setStartedAfterUpdate(args.isSet(updatedOpt));
 
     QQmlApplicationEngine engine;
     engine.addImportPath(QStringLiteral("qrc:/"));

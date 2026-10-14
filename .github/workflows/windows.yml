@@ -18,6 +18,8 @@ jobs:
         shell: msys2 {0}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 60   # commit list for the updater's "what changed"
 
       - uses: msys2/setup-msys2@v2
         with:
@@ -37,7 +39,7 @@ jobs:
             mingw-w64-ucrt-x86_64-SDL2
 
       - name: Configure
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCH_BUILD_NUMBER=${{ github.run_number }} -DCH_COMMIT=${{ github.sha }}
 
       - name: Build
         run: cmake --build build -j4
@@ -87,11 +89,48 @@ jobs:
           cat ../smoke.log
           test -s ../smoke.png
 
+      - name: Zip
+        run: |
+          cd dist
+          zip -qr ../CyberHandStudio-win64.zip .
+          cd ..
+          ls -la CyberHandStudio-win64.zip
+
+      - name: version.json (in-app updater)
+        shell: bash
+        run: |
+          python tools/make_version_json.py --zip CyberHandStudio-win64.zip --build ${{ github.run_number }} \
+            --commit "${GITHUB_SHA}" --out version.json --notes notes.md
+          head -c 600 version.json; echo
+
+      # an older copy of the app installs the new zip over itself and restarts (same path as the Update button)
+      - name: Update test (install zip over a copy, restart)
+        run: |
+          rm -rf upd && mkdir upd && cp -r dist upd/app
+          echo "old build" > upd/app/README.md
+          ZIP="$(cygpath -w "$PWD/CyberHandStudio-win64.zip")"
+          cd upd/app
+          QT_FORCE_STDERR_LOGGING=1 ./CyberHandStudio.exe --install-update "$ZIP" > ../install.log 2>&1 || echo "exit=$?" >> ../install.log
+          cat ../install.log
+          for i in $(seq 1 120); do
+            grep -q "starting the app" update.log 2>/dev/null && break
+            sleep 1
+          done
+          cat update.log || true
+          sleep 8
+          tasklist //FI "IMAGENAME eq CyberHandStudio.exe" || true
+          taskkill //IM CyberHandStudio.exe //F || true
+          grep -q "done (robocopy" update.log
+          cmp README.md ../../dist/README.md
+          echo "update test ok"
+
       - name: Publish smoke result to branch ci-smoke
         if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
         shell: bash
         run: |
           mkdir -p /tmp/smoke && cp smoke.png smoke.log /tmp/smoke/ 2>/dev/null || true
+          cp upd/install.log /tmp/smoke/update_install.log 2>/dev/null || true
+          cp upd/app/update.log /tmp/smoke/update.log 2>/dev/null || true
           ls /tmp/smoke
           cd /tmp/smoke
           git init -q -b ci-smoke
@@ -100,13 +139,6 @@ jobs:
           echo "${GITHUB_SHA}" > sha.txt
           git add -A && git commit -qm "smoke ${GITHUB_SHA::7}"
           git push -qf "https://x-access-token:${{ github.token }}@github.com/${GITHUB_REPOSITORY}.git" ci-smoke
-
-      - name: Zip
-        run: |
-          cd dist
-          zip -qr ../CyberHandStudio-win64.zip .
-          cd ..
-          ls -la CyberHandStudio-win64.zip
 
       - uses: actions/upload-artifact@v4
         with:
@@ -129,9 +161,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --yes --cleanup-tag || true
-          gh release create latest CyberHandStudio-win64.zip \
-            --prerelease --title "Latest build (main)" \
-            --notes "Tự động build từ commit ${GITHUB_SHA::7}. Tải zip, giải nén, chạy CyberHandStudio.exe."
+          gh release create latest CyberHandStudio-win64.zip version.json \
+            --prerelease --title "Latest build (main)" --notes-file notes.md
 
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')

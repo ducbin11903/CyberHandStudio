@@ -66,6 +66,15 @@ Cập nhật: 2026-09-27
 - `ControlCANFD.dll` (x64) kèm sẵn cạnh exe (`third_party/waveshare/`), không còn ô chọn đường dẫn DLL.
 - Chưa thử với adapter thật.
 
+### 0.7.0 — tự cập nhật
+
+- Updater: đọc `version.json` trên release "latest" (CI ghi build number, commit, sha256, 40 commit gần nhất),
+  so build của app, tải zip (kiểm sha256), giải nén bằng tar của Windows, script PowerShell chờ app đóng → robocopy
+  đè thư mục app → mở lại (`--updated` / `--update-failed`, `update.log`). Tự kiểm tra khi mở (QSettings `update/autoCheck`).
+- UI: nút Cập nhật (thanh trái), hộp thoại (phiên bản, thay đổi, tiến độ), thanh báo bản mới / kết quả sau khi mở lại.
+- CI: `-DCH_BUILD_NUMBER/-DCH_COMMIT`, `tools/make_version_json.py`, bước thử: bản copy tự cài zip mới rồi mở lại.
+- Bản tự build (build 0) không tự cập nhật.
+
 ## Giả định cần Duc xác nhận
 
 - (đã xác nhận) T1 = xoay ngón cái (Thumb Rotation, opposition), T2 = gập ngón cái (Thumb Flexion).

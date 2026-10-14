@@ -7,6 +7,13 @@ C++17 + Qt 6 (QML, Quick 3D, SerialPort), chạy Windows / Linux.
 
 GitHub → Releases → **Latest build (main)** → tải `CyberHandStudio-win64.zip`, giải nén, chạy `CyberHandStudio.exe`.
 
+## Cập nhật
+
+App tự kiểm tra bản build mới nhất trên GitHub khi mở (tắt được). Có bản mới → thanh báo phía trên hoặc nút
+Cập nhật (thanh icon bên trái, dưới cùng) → **Tải về** → **Khởi động lại & cập nhật**: app đóng (motor về duty 0),
+chép file mới đè lên thư mục app rồi tự mở lại. Cấu hình không mất. Nhật ký: `update.log` trong thư mục app.
+Thư mục app phải ghi được (đừng giải nén vào Program Files).
+
 ## Chức năng
 
 | Khu | Nội dung |
