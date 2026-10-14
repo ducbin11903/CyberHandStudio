@@ -11,7 +11,7 @@ GitHub → Releases → **Latest build (main)** → tải `CyberHandStudio-win64
 
 | Khu | Nội dung |
 |---|---|
-| Bảng trái | Communication (COM, baud, line ending, giao thức), Control (send rate, speed %, log rate, soft start/stop, giới hạn dòng), Motor (Enable/Disable/Home/Zero/Clear, góc khớp, duty, tốc độ, PID), Poses, Joints (cnt/90°, min/max), Macros, Visual |
+| Bảng trái | Communication (1 cổng / 2 cổng / CAN, COM, baud, adapter CAN, giao thức), Control (send rate, speed %, log rate, soft start/stop, giới hạn dòng), Motor (Enable/Disable/Home/Zero/Clear, góc khớp, duty, tốc độ, PID), Poses, Joints (cnt/90°, min/max), Macros, Visual |
 | 3D | Bàn tay 6 khớp T2 T1 I M R P, khối đặc = đo được, bóng xanh = đích |
 | Status | Driver, mode, homed, vị trí/đích/sai lệch, duty, tốc độ, lỗi DIAG/Quá dòng/KEY, current monitor (actual/peak/ngưỡng) |
 | Text | Nạp CSV quỹ đạo, vẽ theo khớp, phát (Once/Loop/Bounce, tốc độ), AI tạo quỹ đạo từ mô tả |
@@ -20,6 +20,7 @@ GitHub → Releases → **Latest build (main)** → tải `CyberHandStudio-win64
 | Stream | Nhận khung góc khớp qua UDP (JSON/CSV), hiệu chuẩn min/max, Mirror tới tay, dạng Bars/Graph |
 | Live | Đồ thị log firmware theo thời gian thực |
 | Console | Dòng chữ firmware, lệnh đã gửi, ô gửi lệnh có lịch sử |
+| CAN monitor | Khung CAN thô (ID, FD/BRS, hex, giải mã), lọc ID, gửi khung tay |
 
 Mọi thao tác quy về lệnh CLI hiện có của firmware (`e d x o g p t v k H z c s l h`). Xem `docs/PROTOCOL.md`.
 
@@ -30,6 +31,8 @@ Mọi thao tác quy về lệnh CLI hiện có của firmware (`e d x o g p t v 
 - Board MCB 2 MCU: `--g474 U6` và `--g474 U7` (2 tiến trình → app chế độ "2 cổng"), hoặc `--g474 U6 --bridge`
   (fw 0.8, 1 cổng điều khiển cả 6 khớp qua link UART). Cảm biến bo mạch (fw 0.9): `--temp`, `--vbat`, lệnh
   `simtemp <C>` / `simvbat <V>` / `simsht off|on`. Xem docs/PROTOCOL.md.
+- CAN (fw 0.11): `python tools/fw_sim.py --can-udp 7470`, app: Communication → Kết nối → CAN → adapter "Ảo (UDP)" → Connect.
+  Adapter thật Waveshare USB-CAN-FD: chép `x64/ControlCANFD.dll` cạnh `CyberHandStudio.exe`.
 - Stream: `python tools/stream_demo.py` rồi vào Stream → Start.
 
 ## Build

@@ -20,11 +20,15 @@ Options: --joints 6 to emulate the proposed 6-joint log (q1..q6, t1..t6, i1..i6)
          bridges the other one (keys = all 6, link=U7, text of U7 prefixed "[U7] ",
          @U7 <line> raw, `link on|off` to simulate losing the link, log + lk:1).
 Two ports (app mode "2 cổng"): run two sims, --g474 U6 and --g474 U7.
+CAN (app mode "CAN", adapter "Virtual (UDP)"): --can-udp 7470 runs both MCUs as CAN nodes
+         (fw 0.11-g474, protocol CAN v1 in docs/PROTOCOL.md): TEXT 0x280+n, STATUS 0x300+n at
+         `canlog <hz>`, POS_ALL, E-STOP, HOST_HB watchdog; sim command `simdrop <n>` skips STATUS seq.
 """
 import argparse
 import math
 import os
 import random
+import struct
 import sys
 import time
 
@@ -88,6 +92,7 @@ class Firmware:
         self.iresp = 0           # 0 trip, 1 retract, 2 hold, 3 warn
         self.retract_deg = 10.0
         self.i_hz = 1000.0       # `a <hz>` current averaging
+        self.homed = False       # zero set by `z` or homing (CAN STATUS bit)
         self.buf = b""
         self.last_log = 0.0
         self.write("USBX: OK")
@@ -228,6 +233,7 @@ class Firmware:
                 m.stop -= m.pos
                 m.pos = 0
                 m.tgt = 0
+            self.homed = True
             self.ok("zero")
         elif c == "c":
             self.flt = 0
@@ -310,6 +316,7 @@ class Firmware:
                     mm.tgt = 0
                 self.mode = 1
                 self.home = None
+                self.homed = True
                 self.write("HOME: done")
             elif time.time() - self.home["t0"] > 10:
                 self.mode = 0
@@ -822,6 +829,183 @@ class G474Bridge(G474):
         self.write("%s,%s%s,lk:%d" % (head, tail, self.board_fields(), 1 if self.link_up else 0))
 
 
+# ---------------------------------------------------------------------------
+# MCB fw 0.11: CAN FD protocol v1 (docs/PROTOCOL.md "CAN v1") on a UDP virtual bus.
+# One datagram per frame: "CF" u8 flags (b0 FD, b1 BRS, b2 EXT) u8 len u32 id (LE) data[len].
+
+CAN_ESTOP, CAN_HB, CAN_POS_ALL, CAN_CMD, CAN_TEXT, CAN_STATUS, CAN_PING, CAN_PONG = (
+    0x000, 0x080, 0x100, 0x200, 0x280, 0x300, 0x700, 0x780)
+FD_LENS = (0, 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 20, 24, 32, 48, 64)
+
+
+def fd_pad(b):
+    n = next(l for l in FD_LENS if l >= len(b))
+    return bytes(b) + b"\0" * (n - len(b))
+
+
+class CanNode:
+    """one G474 on the bus: CLI over CMD_TEXT / TEXT, STATUS at `canlog` Hz, POS_ALL, E-STOP, HB watchdog"""
+
+    def __init__(self, n, sensor, send):
+        self.n = n
+        self.send = send
+        self.g = G474("U6" if n == 1 else "U7", self.text, banner=False, sensor=sensor)
+        self.g.VERSION = "0.11-g474"
+        self.g.log_hz = 0              # STATUS frames replace the text log
+        self.g.owns_sensor = n == 2    # SHT40 + VBAT are on U7
+        self.canlog = 50.0
+        self.seq = 0
+        self.drop = 0
+        self.last_status = 0.0
+        self.t0 = time.time()
+        self.last_hb = None            # watchdog armed by the first HOST_HB
+
+    def text(self, line):
+        b = (line + "\n").encode()
+        while b:
+            self.send(CAN_TEXT + self.n, b[:64])
+            b = b[64:]
+
+    def command(self, line):
+        parts = line.split()
+        if not parts:
+            return
+        c, args = parts[0], parts[1:]
+        if c == "canlog":
+            if args:
+                try:
+                    self.canlog = max(0.0, min(100.0, float(args[0])))
+                except ValueError:
+                    return self.g.err("canlog <0..100>")
+            return self.g.ok("canlog %d Hz" % self.canlog)
+        if c == "l":                   # text log goes to USB only, not on CAN
+            return self.g.ok("log %s Hz (USB only, CAN uses canlog)" % (args[0] if args else "0"))
+        if c == "simdrop":             # sim only: the next STATUS skips <n> sequence numbers
+            self.drop = int(args[0]) if args and args[0].isdigit() else 1
+            return self.g.ok("simdrop %d" % self.drop)
+        self.g.command(line)
+
+    def motors_off(self, bit):
+        for ch in self.g.ch:
+            ch.en = 0
+            ch.mode = 0
+            ch.duty = 0
+            ch.home = None
+            ch.flt |= bit
+
+    def estop(self):
+        self.motors_off(4)
+        self.text("ESTOP: all motors off (flt 4)")
+
+    def heartbeat(self):
+        self.last_hb = time.time()
+
+    def pos_all(self, data):
+        for j in range(min(6, len(data) // 2)):
+            v = struct.unpack_from("<h", data, 2 * j)[0]
+            key = APP_ORDER[j]
+            if v == 0x7FFF or key not in self.g.keys:
+                continue
+            ch = self.g.ch[self.g.keys.index(key)]
+            self.g._mute = True
+            ch.command("g %.2f" % (v / 100.0))
+            self.g._mute = False
+
+    def status(self):
+        d = bytearray(64)
+        self.seq = (self.seq + 1 + self.drop) & 0xFFFF
+        self.drop = 0
+        struct.pack_into("<BBH", d, 0, 1, self.n, self.seq)
+        for b, (key, ch) in enumerate(zip(self.g.keys, self.g.ch)):
+            m = ch.motors[0]
+            bits = ((1 if ch.en else 0) | (2 if ch.homed else 0) | ((ch.mode & 3) << 2)
+                    | (0 if (ch.en and not ch.no_vm) else 0x10))
+            struct.pack_into("<BBBbiih", d, 4 + 14 * b, APP_ORDER.index(key) + 1, bits, ch.flt & 0xFF,
+                             int(max(-128, min(127, round(m.out)))), int(m.pos),
+                             int(m.tgt if ch.mode == 1 else m.pos), int(max(-32768, min(32767, m.i_rep))))
+        s = self.g.board()
+        temp = int(round(s.temp * 10)) if (s and s.sht) else 0x7FFF
+        rh = int(round(s.rh * 10)) if (s and s.sht) else 0xFFFF
+        vbat = int(max(0, min(65535, round(s.vbat * 1000)))) if s else 0
+        struct.pack_into("<hHH", d, 46, temp, rh, vbat)
+        p = self.g.protect
+        d[52] = (1 if p.hot else 0) | (2 if p.low else 0) | 4   # b2: UART link to the other MCU alive
+        struct.pack_into("<I", d, 56, int((time.time() - self.t0) * 1000) & 0xFFFFFFFF)
+        self.send(CAN_STATUS + self.n, bytes(d))
+
+    def step(self, dt):
+        now = time.time()
+        if self.last_hb is not None and now - self.last_hb > 0.3:
+            self.last_hb = None
+            if any(ch.en or ch.mode for ch in self.g.ch):
+                self.motors_off(8)
+                self.text("LINK: host heartbeat lost > 300 ms, all motors off (flt 8)")
+        self.g.step(dt)
+        if self.canlog > 0 and now - self.last_status >= 1.0 / self.canlog:
+            self.last_status = now
+            self.status()
+
+
+def run_can_udp(a):
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((a.can_host, a.can_udp))
+    sock.setblocking(False)
+    peer = [None]                      # the app: address of the last datagram
+
+    def send(fid, data, fd=True, brs=True):
+        if peer[0] is None:
+            return
+        data = fd_pad(data) if fd else bytes(data[:8])
+        pkt = b"CF" + struct.pack("<BBI", (1 if fd else 0) | (2 if brs else 0), len(data), fid) + data
+        try:
+            sock.sendto(pkt, peer[0])
+        except OSError:
+            pass
+
+    sensor = BoardSensor(a.temp, a.vbat)
+    nodes = [CanNode(1, sensor, send), CanNode(2, sensor, send)]
+    for nd in nodes:
+        nd.g.no_vm = a.no_vm
+    print("CAN UDP %s:%d  node 1 = U6 (I T1 T2), node 2 = U7 (M R P), fw 0.11-g474" % (a.can_host, a.can_udp),
+          flush=True)
+
+    last = time.time()
+    while True:
+        while True:
+            try:
+                pkt, addr = sock.recvfrom(2048)
+            except (BlockingIOError, OSError):
+                break
+            if len(pkt) < 8 or pkt[:2] != b"CF":
+                continue
+            peer[0] = addr
+            flags, n, fid = struct.unpack_from("<BBI", pkt, 2)
+            data = pkt[8:8 + n]
+            fid &= 0x1FFFFFFF if flags & 4 else 0x7FF
+            if fid == CAN_ESTOP:
+                for nd in nodes:
+                    nd.estop()
+            elif fid == CAN_HB:
+                for nd in nodes:
+                    nd.heartbeat()
+            elif fid == CAN_POS_ALL:
+                for nd in nodes:
+                    nd.pos_all(data)
+            elif CAN_CMD <= fid <= CAN_CMD + 2:
+                line = data.replace(b"\0", b"").decode(errors="replace").strip()
+                for nd in nodes:
+                    if fid == CAN_CMD or fid == CAN_CMD + nd.n:
+                        nd.command(line)
+            elif fid in (CAN_PING + 1, CAN_PING + 2):
+                send(CAN_PONG + fid - CAN_PING, data, bool(flags & 1), bool(flags & 2))
+        now = time.time()
+        for nd in nodes:
+            nd.step(now - last)
+        last = now
+        time.sleep(0.001)
+
+
 HELP_G474 = """
 CyberHand G474 sim (fw 0.7-g474) — this MCU drives 3 joints, see keys= in the ID line
   m <key|1..3>   select the motor for o + - r 0 p t v k x H z j I a s
@@ -865,7 +1049,13 @@ def main():
     ap.add_argument("--bridge", action="store_true", help="with --g474: fw 0.8, also drive the other MCU over the UART link")
     ap.add_argument("--temp", type=float, default=25.0, help="with --g474: board temperature at start, C")
     ap.add_argument("--vbat", type=float, default=7.99, help="with --g474: battery voltage at start, V (< 3 = no battery)")
+    ap.add_argument("--can-udp", type=int, metavar="PORT",
+                    help="MCB fw 0.11 on CAN FD v1: both MCUs (node 1 U6, node 2 U7) on a UDP virtual bus")
+    ap.add_argument("--can-host", default="127.0.0.1", help="with --can-udp: address to listen on")
     a = ap.parse_args()
+
+    if a.can_udp:
+        return run_can_udp(a)
 
     if a.port:
         import serial  # pyserial

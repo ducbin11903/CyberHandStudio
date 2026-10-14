@@ -33,7 +33,8 @@ Card {
     component PortStatus: ColumnLayout {
         id: ps
         property int port: 0
-        readonly property var link: port === 0 ? Core.link : Core.link2
+        readonly property var link: Core.ctrl.connectionMode === 2 ? (port === 0 ? Core.can.node1 : Core.can.node2)
+                                                                   : (port === 0 ? Core.link : Core.link2)
         readonly property var info: Core.ctrl.ports[port] || ({})
         readonly property var keys: info.keys || []
         readonly property bool peerLost: (info.peer || "").length > 0 && info.peerUp === 0
@@ -45,7 +46,9 @@ Card {
             Led { on: ps.link.connected && ps.link.lastLineAgeMs >= 0 && ps.link.lastLineAgeMs < 1500 }
             TextLabel {
                 visible: text.length > 0
-                text: (ps.info.mcu || "").length ? ps.info.mcu : (Core.ctrl.dualPort ? qsTr("Cổng %1").arg(ps.port + 1) : "")
+                text: (ps.info.mcu || "").length ? ps.info.mcu
+                      : (Core.ctrl.connectionMode === 2 ? qsTr("Node %1").arg(ps.port + 1)
+                         : (Core.ctrl.dualPort ? qsTr("Cổng %1").arg(ps.port + 1) : ""))
                 color: Theme.mcuColor(ps.info.mcu)
                 font.bold: true
                 font.pixelSize: Theme.fontSmall
@@ -57,7 +60,8 @@ Card {
                 color: ps.link.errorString.length && !ps.link.connected ? Theme.liveRed : Theme.textSecondary
                 text: {
                     if (!ps.link.connected)
-                        return ps.link.errorString.length ? ps.link.errorString : qsTr("Chưa kết nối")
+                        return ps.link.errorString.length ? ps.link.errorString
+                             : (Core.can.busy ? qsTr("Đang mở adapter…") : qsTr("Chưa kết nối"))
                     var age = ps.link.lastLineAgeMs
                     return (Core.ctrl.openPorts > 1 ? ps.link.portName + " · " : "")
                         + qsTr("RX %1 B/s · %2 dòng/s · dòng cuối %3")
@@ -87,7 +91,15 @@ Card {
         }
     }
 
+    readonly property bool canMode: Core.ctrl.connectionMode === 2
+
     TextPrompt { id: prompt }
+    FileDialog {
+        id: dllDialog
+        title: qsTr("ControlCANFD.dll (Waveshare USB-CAN-FD, bản x64)")
+        nameFilters: ["ControlCANFD.dll (*.dll)"]
+        onAccepted: Core.can.dllPath = Core.localPath(selectedFile.toString())
+    }
     FolderDialog {
         id: cadDialog
         title: qsTr("Thư mục mô hình 3D (rig.json)")
@@ -142,10 +154,21 @@ Card {
             Item { Layout.preferredWidth: 4 }
             FlatButton {
                 Layout.preferredWidth: 104
-                accent: !Core.ctrl.connected
-                text: Core.ctrl.connected ? qsTr("Disconnect") : qsTr("Connect")
+                accent: !Core.ctrl.connected && !Core.can.busy
+                text: Core.ctrl.connected || Core.can.busy ? qsTr("Disconnect") : qsTr("Connect")
                 iconPath: Icons.plug
                 onClicked: Core.toggleConnection()
+            }
+            // E-STOP: CAN 0x000 (every motor off now), serial: D / d to every port
+            FlatButton {
+                Layout.preferredWidth: 30
+                danger: true
+                iconPath: Icons.stop
+                iconFilled: true
+                enabled: Core.ctrl.connected
+                tip: Core.ctrl.connectionMode === 2 ? qsTr("E-STOP (Esc): khung CAN 0x000, tắt mọi motor")
+                                                    : qsTr("E-STOP (Esc): tắt mọi motor (D)")
+                onClicked: Core.estop()
             }
         }
 
@@ -169,15 +192,113 @@ Card {
                     FormRow {
                         label: qsTr("Kết nối")
                         SegmentToggle {
-                            options: [qsTr("1 cổng"), qsTr("2 cổng · U6 + U7")]
-                            currentIndex: Core.ctrl.dualPort ? 1 : 0
-                            enabled: !Core.ctrl.connected
+                            options: [qsTr("1 cổng"), qsTr("2 cổng · U6 + U7"), qsTr("CAN")]
+                            currentIndex: Core.ctrl.connectionMode
+                            enabled: !Core.ctrl.connected && !Core.can.busy
                             opacity: enabled ? 1 : 0.5
-                            onActivated: (i) => Core.ctrl.dualPort = (i === 1)
+                            onActivated: (i) => Core.ctrl.connectionMode = i
                         }
                         Item { Layout.fillWidth: true }
                     }
+                    // ---- CAN adapter (Waveshare USB-CAN-FD or the fw_sim UDP bus) ----
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 1
+                        visible: root.canMode
+                        enabled: !Core.can.connected && !Core.can.busy
+                        FormRow {
+                            label: qsTr("Adapter")
+                            FlatCombo {
+                                Layout.fillWidth: true
+                                model: Core.can.backendNames
+                                currentIndex: Core.can.backend
+                                onActivated: (i) => Core.can.backend = i
+                            }
+                        }
+                        FormRow {
+                            visible: Core.can.backend === 0
+                            label: qsTr("Thiết bị · kênh")
+                            NumberField {
+                                Layout.preferredWidth: 56
+                                value: Core.can.deviceIndex; decimals: 0; from: 0; to: 15
+                                onCommitted: (v) => Core.can.deviceIndex = v
+                            }
+                            SegmentToggle {
+                                options: ["CAN1", "CAN2"]
+                                currentIndex: Core.can.channel
+                                onActivated: (i) => Core.can.channel = i
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        FormRow {
+                            visible: Core.can.backend === 0
+                            label: qsTr("Bitrate")
+                            FlatCombo {
+                                id: arbCombo
+                                readonly property var rates: [125000, 250000, 500000, 1000000]
+                                Layout.fillWidth: true
+                                model: ["125k", "250k", "500k", "1M"]
+                                currentIndex: rates.indexOf(Core.can.arbBaud)
+                                onActivated: (i) => Core.can.arbBaud = rates[i]
+                                Tip { visible: arbCombo.hovered; text: qsTr("Pha trọng tài (arbitration)") }
+                            }
+                            TextLabel { text: "/"; secondary: true }
+                            FlatCombo {
+                                id: dataCombo
+                                readonly property var rates: [1000000, 2000000, 4000000, 5000000]
+                                Layout.fillWidth: true
+                                model: ["1M", "2M", "4M", "5M"]
+                                currentIndex: rates.indexOf(Core.can.dataBaud)
+                                onActivated: (i) => Core.can.dataBaud = rates[i]
+                                Tip { visible: dataCombo.hovered; text: qsTr("Pha dữ liệu (BRS)") }
+                            }
+                        }
+                        FormRow {
+                            visible: Core.can.backend === 0
+                            label: qsTr("Điện trở 120 Ω")
+                            FlatCheck {
+                                text: qsTr("bật trên adapter")
+                                checked: Core.can.termination
+                                onToggled: Core.can.termination = checked
+                            }
+                            Item { Layout.fillWidth: true }
+                        }
+                        FormRow {
+                            visible: Core.can.backend === 0
+                            label: qsTr("ControlCANFD.dll")
+                            FlatField {
+                                Layout.fillWidth: true
+                                text: Core.can.dllPath
+                                placeholderText: qsTr("cạnh CyberHandStudio.exe")
+                                onEditingFinished: Core.can.dllPath = text.trim()
+                            }
+                            IconButton { iconPath: Icons.folder; tip: qsTr("Chọn ControlCANFD.dll (bản x64)"); onClicked: dllDialog.open() }
+                        }
+                        FormRow {
+                            visible: Core.can.backend === 1
+                            label: qsTr("UDP")
+                            FlatField {
+                                Layout.fillWidth: true
+                                text: Core.can.udpHost
+                                onEditingFinished: Core.can.udpHost = text.trim()
+                            }
+                            TextLabel { text: ":"; secondary: true }
+                            NumberField {
+                                Layout.preferredWidth: 70
+                                value: Core.can.udpPort; decimals: 0; from: 1; to: 65535
+                                onCommitted: (v) => Core.can.udpPort = v
+                            }
+                        }
+                        TextLabel {
+                            Layout.fillWidth: true
+                            visible: Core.can.backend === 1
+                            text: qsTr("Bus ảo: python tools/fw_sim.py --can-udp %1").arg(Core.can.udpPort)
+                            muted: true
+                            font.pixelSize: Theme.fontTiny
+                        }
+                    }
                     FormRow {
+                        visible: !root.canMode
                         label: Core.ctrl.dualPort ? qsTr("Cổng 1") : qsTr("COM Port")
                         PortCombo { link: Core.link }
                         IconButton { iconPath: Icons.refresh; tip: qsTr("Quét lại cổng"); onClicked: { Core.link.refreshPorts(); Core.link2.refreshPorts() } }
@@ -189,6 +310,7 @@ Card {
                         Item { implicitWidth: 24 }
                     }
                     FormRow {
+                        visible: !root.canMode
                         label: qsTr("Baud")
                         FlatCombo {
                             id: baudCombo
@@ -201,6 +323,7 @@ Card {
                         }
                     }
                     FormRow {
+                        visible: !root.canMode
                         label: qsTr("Line ending")
                         FlatCombo {
                             Layout.fillWidth: true
@@ -210,6 +333,7 @@ Card {
                         }
                     }
                     FormRow {
+                        visible: !root.canMode   // CAN: positions always go as POS_ALL
                         label: qsTr("Protocol")
                         FlatCombo {
                             Layout.fillWidth: true
@@ -236,8 +360,25 @@ Card {
                         }
                     }
                     Repeater {
-                        model: Core.ctrl.dualPort ? 2 : 1
+                        model: Core.ctrl.connectionMode >= 1 ? 2 : 1
                         PortStatus { port: index }
+                    }
+                    // CAN: frame rates, STATUS frames lost (by seq), controller error state
+                    TextLabel {
+                        Layout.fillWidth: true
+                        visible: root.canMode && (Core.can.connected || Core.can.errorString.length > 0)
+                        font.pixelSize: Theme.fontSmall
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                        color: !Core.can.connected || Core.can.busProblem ? Theme.liveRed
+                               : (Core.can.statusLost > 0 ? Theme.warnAmber : Theme.textSecondary)
+                        text: !Core.can.connected ? Core.can.errorString
+                              : qsTr("%1 · RX %2 / TX %3 khung/s · STATUS mất %4")
+                                .arg(Core.can.description)
+                                .arg(Math.round(Core.can.rxFramesPerSec))
+                                .arg(Math.round(Core.can.txFramesPerSec))
+                                .arg(Core.can.statusLostText)
+                                + (Core.can.busStateText.length ? " · " + Core.can.busStateText : "")
                     }
                     TextLabel {
                         Layout.fillWidth: true

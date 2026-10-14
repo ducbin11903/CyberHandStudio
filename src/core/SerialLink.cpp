@@ -3,7 +3,7 @@
 #include <QSerialPortInfo>
 
 SerialLink::SerialLink(QObject *parent)
-    : QObject(parent)
+    : Transport(parent)
 {
     connect(&m_port, &QSerialPort::readyRead, this, &SerialLink::onReadyRead);
     connect(&m_port, &QSerialPort::errorOccurred, this, &SerialLink::onError);

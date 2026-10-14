@@ -41,6 +41,13 @@ ApplicationWindow {
                 IconButton { iconPath: Icons.wifi; tip: qsTr("Stream"); checked: Core.activeMode === "stream"; onClicked: Core.activeMode = "stream" }
                 IconButton { iconPath: Icons.activity; tip: qsTr("Live log"); checked: Core.activeMode === "live"; onClicked: Core.activeMode = "live" }
                 IconButton { iconPath: Icons.terminal; tip: qsTr("Console"); checked: Core.activeMode === "console"; onClicked: Core.activeMode = "console" }
+                IconButton {
+                    visible: Core.ctrl.connectionMode === 2 || Core.activeMode === "canmon"
+                    iconPath: Icons.canbus
+                    tip: qsTr("CAN monitor")
+                    checked: Core.activeMode === "canmon"
+                    onClicked: Core.activeMode = "canmon"
+                }
             }
             ColumnLayout {
                 anchors.bottom: parent.bottom
@@ -164,6 +171,13 @@ ApplicationWindow {
         else if (name === "datamonitor") dataWin.show()
     }
 
+    // E-STOP: CAN frame 0x000 / D to every port, from anywhere in the app
+    Shortcut {
+        sequence: "Esc"
+        context: Qt.ApplicationShortcut
+        enabled: Core.ctrl.connected
+        onActivated: Core.estop()
+    }
     Shortcut {
         sequence: "Space"
         context: Qt.ApplicationShortcut

@@ -26,6 +26,8 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_telemetry = new Telemetry(m_hand, this);
     m_ctrl = new HandController(m_link, m_console, m_hand, this);
     m_ctrl->addLink(m_link2);
+    m_can = new CanBus(this);
+    m_ctrl->setCan(m_can);
     m_live = new LiveSeries(this);
     m_streamSeries = new LiveSeries(this);
     m_streamSeries->setCapacity(6000);
@@ -52,23 +54,30 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_config->setCollector([this]() { return collect(); });
     m_config->setApplier([this](const QJsonObject &o) { apply(o); });
 
-    // serial -> parser -> telemetry / console (port 1 and port 2)
+    // transports -> parser -> telemetry / console: port i = serial link i, or CAN node i + 1
     for (int i = 0; i < 2; ++i) {
-        SerialLink *l = i ? m_link2 : m_link;
-        connect(l, &SerialLink::lineReceived, this, [this, i](const QString &line, double) { onLine(i, line); });
-        connect(l, &SerialLink::lineSent, this, [this, i](const QString &line, bool quiet) {
-            m_console->onSent(line, quiet, txTag(i));
-            // Enable acknowledges a "safe again" banner (the firmware refuses while still unsafe)
-            if (line == QLatin1String("e") || line.startsWith(QLatin1String("e ")))
-                m_board->onEnableSent();
-        });
-        connect(l, &SerialLink::connectedChanged, this, [this, i]() { onPortConnection(i); });
-        connect(l, &SerialLink::errorStringChanged, this, [this, l]() {
-            if (!l->errorString().isEmpty())
-                m_console->error(m_ctrl->openPorts() > 0 || m_ctrl->dualPort()
-                                     ? QStringLiteral("%1: %2").arg(l->portName(), l->errorString())
-                                     : l->errorString());
-        });
+        const bool canSide[] = {false, true};
+        for (bool isCan : canSide) {
+            Transport *l = isCan ? static_cast<Transport *>(m_can->node(i + 1)) : (i ? m_link2 : m_link);
+            connect(l, &Transport::lineReceived, this, [this, i](const QString &line, double) { onLine(i, line); });
+            connect(l, &Transport::lineSent, this, [this, i](const QString &line, bool quiet) {
+                m_console->onSent(line, quiet, txTag(i));
+                // Enable acknowledges a "safe again" banner (the firmware refuses while still unsafe)
+                if (line == QLatin1String("e") || line.startsWith(QLatin1String("e ")))
+                    m_board->onEnableSent();
+            });
+            connect(l, &Transport::connectedChanged, this, [this, i, isCan]() {
+                if (m_ctrl->useCan() == isCan)
+                    onPortConnection(i);
+            });
+            if (!isCan)
+                connect(l, &Transport::errorStringChanged, this, [this, l]() {
+                    if (!l->errorString().isEmpty())
+                        m_console->error(m_ctrl->openPorts() > 0 || m_ctrl->dualPort()
+                                             ? QStringLiteral("%1: %2").arg(l->portName(), l->errorString())
+                                             : l->errorString());
+                });
+        }
         m_idTimer[i].setSingleShot(true);
         m_idTimer[i].setInterval(500);
         connect(&m_idTimer[i], &QTimer::timeout, this, [this, i]() {
@@ -91,12 +100,19 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
                 }
         }
     });
+    connect(m_can, &CanBus::errorChanged, this, [this]() {
+        if (!m_can->errorString().isEmpty())
+            m_console->error(QStringLiteral("CAN: ") + m_can->errorString());
+    });
+    connect(m_can, &CanBus::connectedChanged, this, [this]() {
+        if (m_can->connected())
+            m_console->info(tr("CAN: %1").arg(m_can->description()));
+    });
+    // STATUS -> log line: the main joint's block becomes the head channels
+    m_can->setHeadJoint(m_hand->benchJoint() + 1);
+    connect(m_hand, &HandModel::benchJointChanged, this, [this]() { m_can->setHeadJoint(m_hand->benchJoint() + 1); });
     connect(m_telemetry, &Telemetry::updated, this, &AppCore::runStateChanged);
     connect(m_player, &Player::playingChanged, this, &AppCore::runStateChanged);
-    connect(m_link, &SerialLink::errorStringChanged, this, [this]() {
-        if (!m_link->errorString().isEmpty())
-            m_console->error(m_link->errorString());
-    });
     connect(m_telemetry, &Telemetry::sample, m_live, &LiveSeries::addSample);
     connect(m_telemetry, &Telemetry::overCurrent, this, &AppCore::onOverCurrent);
     // event log: over-current reactions, LINK, OTEMP, VBAT
@@ -205,7 +221,10 @@ void AppCore::registerQmlTypes()
     qmlRegisterSingletonInstance(uri, 1, 0, "Core", this);
     qmlRegisterType<PlotItem>(uri, 1, 0, "PlotItem");
     const QString why = QStringLiteral("owned by Core");
+    qmlRegisterUncreatableType<Transport>(uri, 1, 0, "Transport", why);
     qmlRegisterUncreatableType<SerialLink>(uri, 1, 0, "SerialLink", why);
+    qmlRegisterUncreatableType<CanBus>(uri, 1, 0, "CanBus", why);
+    qmlRegisterUncreatableType<CanFrameLog>(uri, 1, 0, "CanFrameLog", why);
     qmlRegisterUncreatableType<ConsoleModel>(uri, 1, 0, "ConsoleModel", why);
     qmlRegisterUncreatableType<HandModel>(uri, 1, 0, "HandModel", why);
     qmlRegisterUncreatableType<Joint>(uri, 1, 0, "Joint", why);
@@ -244,25 +263,36 @@ QString AppCore::txTag(int port) const
 
 void AppCore::onPortConnection(int port)
 {
-    SerialLink *l = port ? m_link2 : m_link;
+    Transport *l = m_ctrl->linkAt(port);
+    if (!l)
+        return;
     m_gotId[port] = false;
     m_synced[port].clear();
     m_portLog[port] = PortLog();
     if (l->connected()) {
-        if (m_ctrl->openPorts() == 1) {
+        if (!m_session) {
             // first port of a session: fresh state, common time base for both ports
+            m_session = true;
             m_telemetry->reset();
             m_board->reset();
             m_live->clear();
             m_rxClock.start();
         }
-        m_console->info(tr("Đã kết nối %1 @ %2").arg(l->portName()).arg(l->baudRate()));
+        const auto *serial = qobject_cast<SerialLink *>(l);
+        m_console->info(serial ? tr("Đã kết nối %1 @ %2").arg(l->portName()).arg(serial->baudRate())
+                               : tr("Đã kết nối %1").arg(l->portName()));
+        if (l->kind() == QLatin1String("can")) {
+            // CAN: who are you, STATUS at 50 Hz; the node answers with its ID line
+            m_ctrl->sendTo(port, QStringLiteral("i"));
+            m_ctrl->sendTo(port, QStringLiteral("canlog 50"));
+        }
         m_idTimer[port].start();
     } else {
         m_idTimer[port].stop();
         m_console->info(tr("Đã ngắt %1").arg(l->portName()));
         m_boardSeen[port].invalidate();
         if (!m_ctrl->connected()) {
+            m_session = false;
             m_recorder->stop();
             m_telemetry->reset();
             m_board->reset();
@@ -279,14 +309,17 @@ void AppCore::onPortConnection(int port)
 
 bool AppCore::toggleConnection()
 {
-    if (m_ctrl->connected()) {
+    if (m_ctrl->connected() || m_can->busy()) {
         // Disconnect: stop what is streaming and bring every motor to duty 0 first
         m_player->pause();
         m_ctrl->stopAll();
         m_link->close();
         m_link2->close();
+        m_can->close();
         return false;
     }
+    if (m_ctrl->useCan())
+        return m_can->open();
     bool ok = m_link->open();
     if (m_ctrl->dualPort()) {
         if (m_link2->portName().isEmpty()) {
@@ -300,6 +333,41 @@ bool AppCore::toggleConnection()
         }
     }
     return ok;
+}
+
+void AppCore::estop()
+{
+    m_player->pause();
+    if (m_gamepad->output())
+        m_gamepad->setOutput(false);
+    if (m_stream->mirror())
+        m_stream->setMirror(false);
+    if (m_ctrl->estop()) {
+        m_console->error(tr("E-STOP: đã gửi lệnh tắt mọi motor"));
+        m_telemetry->noteEvent(QStringLiteral("ESTOP"), tr("E-STOP từ app"));
+    } else {
+        m_console->error(tr("E-STOP: chưa kết nối"));
+    }
+}
+
+void AppCore::openCanAtStart(const QString &spec)
+{
+    const QStringList p = spec.split(QLatin1Char(':'));
+    m_ctrl->setConnectionMode(2);
+    if (p.value(0).compare(QLatin1String("udp"), Qt::CaseInsensitive) == 0) {
+        m_can->setBackend(CanConfig::Udp);
+        if (p.size() == 2)
+            m_can->setUdpPort(p[1].toInt());
+        else if (p.size() >= 3) {
+            m_can->setUdpHost(p[1]);
+            m_can->setUdpPort(p[2].toInt());
+        }
+    } else {
+        m_can->setBackend(CanConfig::Waveshare);
+        if (p.size() >= 2)
+            m_can->setDeviceIndex(p[1].toInt());
+    }
+    m_can->open();
 }
 
 void AppCore::clearUnreachableFeedback()
@@ -735,6 +803,11 @@ QVariant AppCore::uiValue(const QString &key, const QVariant &fallback) const
     return m_ui.value(key, fallback);
 }
 
+QString AppCore::localPath(const QString &pathOrUrl) const
+{
+    return QDir::toNativeSeparators(Trajectory::localPath(pathOrUrl));
+}
+
 QString AppCore::fileName(const QString &pathOrUrl) const
 {
     return QFileInfo(Trajectory::localPath(pathOrUrl)).fileName();
@@ -802,7 +875,18 @@ QJsonObject AppCore::collect() const
                                                   {QStringLiteral("baud"), m_link->baudRate()},
                                                   {QStringLiteral("lineEnding"), m_link->lineEnding()},
                                                   {QStringLiteral("dual"), m_ctrl->dualPort()},
+                                                  {QStringLiteral("mode"), m_ctrl->connectionMode()},
                                                   {QStringLiteral("port2"), m_link2->portName()}});
+    const CanConfig cc = m_can->config();
+    o.insert(QStringLiteral("can"), QJsonObject{{QStringLiteral("backend"), cc.backend},
+                                                 {QStringLiteral("device"), cc.device},
+                                                 {QStringLiteral("channel"), cc.channel},
+                                                 {QStringLiteral("arbBaud"), cc.arbBaud},
+                                                 {QStringLiteral("dataBaud"), cc.dataBaud},
+                                                 {QStringLiteral("termination"), cc.termination},
+                                                 {QStringLiteral("dllPath"), cc.dllPath},
+                                                 {QStringLiteral("udpHost"), cc.udpHost},
+                                                 {QStringLiteral("udpPort"), cc.udpPort}});
     o.insert(QStringLiteral("control"), QJsonObject{
         {QStringLiteral("protocol"), m_ctrl->protocol()},
         {QStringLiteral("deadband"), m_ctrl->deadband()},
@@ -860,7 +944,24 @@ void AppCore::apply(const QJsonObject &o)
         const QString port2 = link.value(QStringLiteral("port2")).toString();
         if (!port2.isEmpty())
             m_link2->setPortName(port2);
-        m_ctrl->setDualPort(link.value(QStringLiteral("dual")).toBool(false));
+        if (link.contains(QStringLiteral("mode")))
+            m_ctrl->setConnectionMode(link.value(QStringLiteral("mode")).toInt(0));
+        else
+            m_ctrl->setDualPort(link.value(QStringLiteral("dual")).toBool(false));
+    }
+    const QJsonObject cj = o.value(QStringLiteral("can")).toObject();
+    if (!cj.isEmpty() && !m_can->connected()) {
+        CanConfig cc;
+        cc.backend = cj.value(QStringLiteral("backend")).toInt(cc.backend);
+        cc.device = cj.value(QStringLiteral("device")).toInt(cc.device);
+        cc.channel = cj.value(QStringLiteral("channel")).toInt(cc.channel);
+        cc.arbBaud = cj.value(QStringLiteral("arbBaud")).toInt(cc.arbBaud);
+        cc.dataBaud = cj.value(QStringLiteral("dataBaud")).toInt(cc.dataBaud);
+        cc.termination = cj.value(QStringLiteral("termination")).toBool(cc.termination);
+        cc.dllPath = cj.value(QStringLiteral("dllPath")).toString();
+        cc.udpHost = cj.value(QStringLiteral("udpHost")).toString(cc.udpHost);
+        cc.udpPort = cj.value(QStringLiteral("udpPort")).toInt(cc.udpPort);
+        m_can->setConfig(cc);
     }
     const QJsonObject c = o.value(QStringLiteral("control")).toObject();
     if (!c.isEmpty()) {

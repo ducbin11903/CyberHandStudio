@@ -70,5 +70,6 @@ QtObject {
     readonly property string outIn: "M4 18C4 12 8 12 12 12S20 12 20 6"
     readonly property string gauge: "M4 17a8 8 0 1 1 16 0M12 17l4-6M4 17h2M18 17h2M12 9V7"
     readonly property string table: "M4 5h16v14H4zM4 10h16M4 14.5h16M10 5v14"
+    readonly property string canbus: "M3 12h18M7 12V7.5M12 12v4.5M17 12V7.5M5 4.5h4v3H5zM10 16.5h4v3h-4zM15 4.5h4v3h-4z"
     readonly property string grip: "M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01"
 }

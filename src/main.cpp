@@ -50,15 +50,16 @@ int main(int argc, char *argv[])
     args.addVersionOption();
     QCommandLineOption portOpt(QStringLiteral("port"), QStringLiteral("Open this serial port at start"), QStringLiteral("name"));
     QCommandLineOption port2Opt(QStringLiteral("port2"), QStringLiteral("2-port mode: open this serial port as port 2"), QStringLiteral("name"));
+    QCommandLineOption canOpt(QStringLiteral("can"), QStringLiteral("CAN mode: open udp[:port] (fw_sim --can-udp) or waveshare[:device] at start"), QStringLiteral("spec"));
     QCommandLineOption baudOpt(QStringLiteral("baud"), QStringLiteral("Baud rate"), QStringLiteral("rate"), QStringLiteral("115200"));
     QCommandLineOption configDirOpt(QStringLiteral("config-dir"), QStringLiteral("Folder for config profiles"), QStringLiteral("dir"));
-    QCommandLineOption modeOpt(QStringLiteral("mode"), QStringLiteral("Start in this mode (live, text, timeline, controller, stream, console)"), QStringLiteral("mode"));
+    QCommandLineOption modeOpt(QStringLiteral("mode"), QStringLiteral("Start in this mode (live, text, timeline, controller, stream, console, canmon)"), QStringLiteral("mode"));
     QCommandLineOption shotOpt(QStringLiteral("screenshot"), QStringLiteral("Save a screenshot to file and quit"), QStringLiteral("file"));
     QCommandLineOption shotDelayOpt(QStringLiteral("screenshot-delay"), QStringLiteral("Delay before screenshot (ms)"), QStringLiteral("ms"), QStringLiteral("2500"));
     QCommandLineOption scriptOpt(QStringLiteral("run-macro"), QStringLiteral("Run this macro text at start (lines separated by ;)"), QStringLiteral("text"));
     QCommandLineOption playOpt(QStringLiteral("play"), QStringLiteral("Load a trajectory CSV and play it"), QStringLiteral("file"));
     QCommandLineOption evalOpt(QStringLiteral("eval"), QStringLiteral("Evaluate a QML/JS expression after start (repeatable), e.g. \"Core.stream.start()\""), QStringLiteral("js"));
-    args.addOptions({portOpt, port2Opt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt});
+    args.addOptions({portOpt, port2Opt, canOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt});
     args.process(app);
 
     AppCore core(args.value(configDirOpt));
@@ -78,6 +79,8 @@ int main(int argc, char *argv[])
     }
     if (args.isSet(port2Opt))
         core.openPort2AtStart(args.value(port2Opt));
+    if (args.isSet(canOpt))
+        core.openCanAtStart(args.value(canOpt));
     if (args.isSet(scriptOpt)) {
         QString text = args.value(scriptOpt);
         text.replace(QLatin1Char(';'), QLatin1Char('\n'));

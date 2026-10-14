@@ -3,7 +3,8 @@
 #include "ConsoleModel.h"
 #include "HandModel.h"
 #include "LineParser.h"
-#include "SerialLink.h"
+#include "CanBus.h"
+#include "Transport.h"
 
 #include <QHash>
 
@@ -19,7 +20,7 @@ QString mcuOfKey(const QString &key)
 }
 } // namespace
 
-HandController::HandController(SerialLink *link, ConsoleModel *console, HandModel *hand, QObject *parent)
+HandController::HandController(Transport *link, ConsoleModel *console, HandModel *hand, QObject *parent)
     : QObject(parent), m_console(console), m_hand(hand)
 {
     resetStreamState();
@@ -28,7 +29,7 @@ HandController::HandController(SerialLink *link, ConsoleModel *console, HandMode
     connect(m_hand, &HandModel::benchJointChanged, this, &HandController::portChanged);
 }
 
-void HandController::addLink(SerialLink *link)
+void HandController::addLink(Transport *link)
 {
     if (!link || m_ports.size() >= 2)
         return;
@@ -36,11 +37,44 @@ void HandController::addLink(SerialLink *link)
     Port p;
     p.link = link;
     m_ports.append(p);
-    connect(link, &SerialLink::connectedChanged, this, [this, idx]() { onLinkConnection(idx); });
-    connect(link, &SerialLink::portNameChanged, this, &HandController::portChanged);
+    m_serial[idx] = link;
+    connect(link, &Transport::connectedChanged, this, [this, idx]() {
+        if (!useCan())
+            onLinkConnection(idx);
+    });
+    connect(link, &Transport::portNameChanged, this, &HandController::portChanged);
 }
 
-SerialLink *HandController::linkAt(int port) const
+void HandController::setCan(CanBus *bus)
+{
+    m_can = bus;
+    for (int i = 0; i < 2; ++i) {
+        Transport *node = bus->node(i + 1);
+        connect(node, &Transport::connectedChanged, this, [this, i]() {
+            if (useCan())
+                onLinkConnection(i);
+        });
+        connect(node, &Transport::portNameChanged, this, &HandController::portChanged);
+    }
+}
+
+void HandController::setConnectionMode(int m)
+{
+    m = qBound(0, m, m_can ? 2 : 1);
+    if (m == m_mode || connected())
+        return;
+    m_mode = m;
+    for (int i = 0; i < m_ports.size() && i < 2; ++i) {
+        clearPortInfo(i);
+        m_ports[i].link = (m == 2 && m_can) ? static_cast<Transport *>(m_can->node(i + 1)) : m_serial[i];
+    }
+    resetStreamState();
+    updateJointFlags();
+    emit dualPortChanged();
+    emit portChanged();
+}
+
+Transport *HandController::linkAt(int port) const
 {
     return (port >= 0 && port < m_ports.size()) ? m_ports[port].link : nullptr;
 }
@@ -57,7 +91,7 @@ void HandController::onLinkConnection(int port)
 
 bool HandController::portOpen(int port) const
 {
-    const SerialLink *l = linkAt(port);
+    const Transport *l = linkAt(port);
     return l && l->connected();
 }
 
@@ -82,11 +116,7 @@ QVector<int> HandController::openPortList() const
 
 void HandController::setDualPort(bool d)
 {
-    if (d == m_dual)
-        return;
-    m_dual = d;
-    emit dualPortChanged();
-    emit portChanged();
+    setConnectionMode(d ? 1 : 0);
 }
 
 void HandController::setConsoleTarget(int t)
@@ -346,7 +376,9 @@ QString HandController::whereIs(int joint) const
         if (!owner.isEmpty() && m_ports[i].peer == owner && m_ports[i].peerUp == 0)
             return tr("Khớp %1 (%2) nằm ở %3 — link %4-%3 đang mất").arg(j->key(), j->name(), owner, portLabel(i));
     if (!owner.isEmpty() && portOfMcu(owner) < 0) {
-        if (m_dual)
+        if (useCan())
+            return tr("Khớp %1 (%2) nằm ở %3 — %3 chưa trả lời qua CAN").arg(j->key(), j->name(), owner);
+        if (dualPort())
             return tr("Khớp %1 (%2) nằm ở %3 — cổng %3 chưa mở").arg(j->key(), j->name(), owner);
         return tr("Khớp %1 (%2) nằm ở %3 — cắm cổng %3 hoặc bật chế độ 2 cổng").arg(j->key(), j->name(), owner);
     }
@@ -474,7 +506,7 @@ bool HandController::write(const QString &line, bool quiet)
 
 bool HandController::writeTo(int port, const QString &line, bool quiet)
 {
-    SerialLink *l = linkAt(port);
+    Transport *l = linkAt(port);
     if (!l || !l->connected()) {
         if (!quiet)
             m_console->error(tr("Chưa kết nối — không gửi được: %1").arg(line));
@@ -557,6 +589,8 @@ bool HandController::send(const QString &line)
     if (t.isEmpty())
         return false;
     const QVector<int> targets = routeOf(t);
+    if (useCan() && targets.size() > 1)
+        return sendAll(t); // both MCUs: one 0x200 frame
     bool ok = false;
     for (int p : targets)
         ok = writeTo(p, t, false) || ok;
@@ -581,8 +615,45 @@ bool HandController::sendTo(int port, const QString &line)
     return !t.isEmpty() && writeTo(port, t, false);
 }
 
+bool HandController::sendPosAll(const QVector<double> &deg, bool quiet)
+{
+    if (!m_can || !m_can->connected()) {
+        if (!quiet)
+            m_console->error(tr("CAN chưa kết nối — không gửi được vị trí khớp"));
+        return false;
+    }
+    m_can->sendPosAll(deg);
+    QStringList parts;
+    for (int i = 0; i < deg.size() && i < m_hand->count(); ++i)
+        if (!qIsNaN(deg[i]))
+            parts << QStringLiteral("%1=%2").arg(m_hand->joint(i)->key(), LineParser::num(deg[i], 1));
+    const QString text = QStringLiteral("POS_ALL ") + parts.join(QLatin1Char(' '));
+    m_console->onSent(text, quiet, QStringLiteral("CAN"));
+    if (!quiet) {
+        m_last = text;
+        emit lastCommandChanged();
+    }
+    return true;
+}
+
+bool HandController::estop()
+{
+    if (useCan() && m_can && m_can->connected()) {
+        m_console->onSent(QStringLiteral("E-STOP (0x000)"), false, QStringLiteral("CAN"));
+        return m_can->estop();
+    }
+    if (!connected())
+        return false;
+    stopAll();
+    return true;
+}
+
 void HandController::stopAll()
 {
+    if (useCan()) {
+        sendAll(QStringLiteral("D")); // every motor of both MCUs off (0x200)
+        return;
+    }
     for (int p : openPortList()) {
         if (!m_ports[p].keys.isEmpty()) {
             writeTo(p, QStringLiteral("D"), false); // MCB G474: all motors off (bridge: both MCUs)
@@ -598,6 +669,20 @@ bool HandController::sendAll(const QString &line)
     const QString t = line.trimmed();
     if (t.isEmpty())
         return false;
+    if (useCan()) {
+        // CMD_TEXT 0x200: one frame, both MCUs
+        if (!m_can || !m_can->connected()) {
+            m_console->error(tr("Chưa kết nối — không gửi được: %1").arg(t));
+            return false;
+        }
+        if (!m_can->sendText(0, t))
+            return false;
+        for (int n = 1; n <= 2; ++n)
+            m_can->node(n)->noteSent(t, false, t.toUtf8().size());
+        m_last = t;
+        emit lastCommandChanged();
+        return true;
+    }
     const QVector<int> open = openPortList();
     if (open.isEmpty())
         return writeTo(0, t, false); // "Chưa kết nối" note
@@ -648,6 +733,15 @@ bool HandController::moveJoint(int joint, double deg)
         m_console->info(tr("%1 — chỉ cập nhật mô phỏng").arg(whereIs(joint)));
         return false;
     }
+    if (useCan()) {
+        // one joint = POS_ALL with the other five at 0x7FFF
+        QVector<double> q(m_hand->count(), qQNaN());
+        q[joint] = deg;
+        const bool ok = sendPosAll(q, false);
+        if (ok && joint < m_lastSent.size())
+            m_lastSent[joint] = deg;
+        return ok;
+    }
     if (m_protocol == BenchSingle && joint != m_hand->benchJoint()) {
         m_console->info(tr("Bench chỉ có khớp %1 — %2 chỉ cập nhật mô phỏng").arg(m_hand->joint(m_hand->benchJoint())->name(), j->name()));
         return false;
@@ -692,7 +786,8 @@ bool HandController::applyPid()
 
 bool HandController::applyLogRate()
 {
-    return sendAll(QStringLiteral("l ") + LineParser::num(m_logRate, 0));
+    // CAN: STATUS frame rate
+    return sendAll((useCan() ? QStringLiteral("canlog ") : QStringLiteral("l ")) + LineParser::num(m_logRate, 0));
 }
 
 bool HandController::applyPowerRate()
@@ -743,6 +838,24 @@ int HandController::sendJoints(const QVector<double> &deg, bool force, bool quie
             return false;
         return force || qIsNaN(m_lastSent[i]) || qAbs(clamped[i] - m_lastSent[i]) >= m_deadband;
     };
+
+    if (useCan()) {
+        // every joint that moved goes in one POS_ALL frame (the rest 0x7FFF)
+        QVector<double> q(m_hand->count(), qQNaN());
+        int n = 0;
+        for (int i = 0; i < clamped.size(); ++i) {
+            if (!changed(i))
+                continue;
+            q[i] = clamped[i];
+            ++n;
+        }
+        if (n == 0 || !sendPosAll(q, quiet))
+            return 0;
+        for (int i = 0; i < clamped.size(); ++i)
+            if (!qIsNaN(q[i]))
+                m_lastSent[i] = q[i];
+        return n;
+    }
 
     int sent = 0;
     switch (m_protocol) {

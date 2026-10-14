@@ -2,13 +2,14 @@
 
 #include <QByteArray>
 #include <QElapsedTimer>
-#include <QObject>
 #include <QSerialPort>
 #include <QStringList>
 #include <QTimer>
 
-// Serial port with line framing and simple throughput statistics.
-class SerialLink : public QObject
+#include "Transport.h"
+
+// Serial port (USB CDC) with line framing and simple throughput statistics.
+class SerialLink : public Transport
 {
     Q_OBJECT
     Q_PROPERTY(QStringList ports READ ports NOTIFY portsChanged)
@@ -16,12 +17,6 @@ class SerialLink : public QObject
     Q_PROPERTY(QString portName READ portName WRITE setPortName NOTIFY portNameChanged)
     Q_PROPERTY(int baudRate READ baudRate WRITE setBaudRate NOTIFY baudRateChanged)
     Q_PROPERTY(int lineEnding READ lineEnding WRITE setLineEnding NOTIFY lineEndingChanged)
-    Q_PROPERTY(bool connected READ connected NOTIFY connectedChanged)
-    Q_PROPERTY(QString errorString READ errorString NOTIFY errorStringChanged)
-    Q_PROPERTY(double rxBytesPerSec READ rxBytesPerSec NOTIFY statsChanged)
-    Q_PROPERTY(double txBytesPerSec READ txBytesPerSec NOTIFY statsChanged)
-    Q_PROPERTY(double linesPerSec READ linesPerSec NOTIFY statsChanged)
-    Q_PROPERTY(int lastLineAgeMs READ lastLineAgeMs NOTIFY statsChanged)
     Q_PROPERTY(qint64 totalRx READ totalRx NOTIFY statsChanged)
     Q_PROPERTY(qint64 totalTx READ totalTx NOTIFY statsChanged)
 
@@ -33,18 +28,19 @@ public:
 
     QStringList ports() const { return m_ports; }
     QStringList portLabels() const { return m_labels; }
-    QString portName() const { return m_portName; }
+    QString kind() const override { return QStringLiteral("serial"); }
+    QString portName() const override { return m_portName; }
     void setPortName(const QString &n);
     int baudRate() const { return m_baud; }
     void setBaudRate(int b);
     int lineEnding() const { return m_lineEnding; }
     void setLineEnding(int e);
-    bool connected() const { return m_port.isOpen() || m_virtual; }
-    QString errorString() const { return m_error; }
-    double rxBytesPerSec() const { return m_rxRate; }
-    double txBytesPerSec() const { return m_txRate; }
-    double linesPerSec() const { return m_lineRate; }
-    int lastLineAgeMs() const;
+    bool connected() const override { return m_port.isOpen() || m_virtual; }
+    QString errorString() const override { return m_error; }
+    double rxBytesPerSec() const override { return m_rxRate; }
+    double txBytesPerSec() const override { return m_txRate; }
+    double linesPerSec() const override { return m_lineRate; }
+    int lastLineAgeMs() const override;
     qint64 totalRx() const { return m_totalRx; }
     qint64 totalTx() const { return m_totalTx; }
 
@@ -55,11 +51,11 @@ public:
     void setAutoSelect(bool a) { m_autoSelect = a; }
 
     Q_INVOKABLE void refreshPorts();
-    Q_INVOKABLE bool open();
-    Q_INVOKABLE void close();
+    bool open() override;
+    void close() override;
     Q_INVOKABLE bool toggle();
     // Sends text + line ending. Returns false if not connected.
-    Q_INVOKABLE bool sendLine(const QString &text, bool quiet = false);
+    bool sendLine(const QString &text, bool quiet = false) override;
 
     // Port without hardware (unit tests): sent lines are kept in virtualSent(),
     // injectLine() delivers a line as if the firmware had sent it.
@@ -70,14 +66,8 @@ public:
 
 signals:
     void portsChanged();
-    void portNameChanged();
     void baudRateChanged();
     void lineEndingChanged();
-    void connectedChanged();
-    void errorStringChanged();
-    void statsChanged();
-    void lineReceived(const QString &line, double t);
-    void lineSent(const QString &line, bool quiet);
 
 private:
     void onReadyRead();

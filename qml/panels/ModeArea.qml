@@ -7,8 +7,8 @@ import CyberHand.Core
 // Bottom work area: mode selector + mode toolbar + mode content.
 Card {
     id: root
-    readonly property var modeKeys: ["text", "timeline", "controller", "stream", "live", "console"]
-    readonly property var modeNames: ["Text", "Timeline", "Controller", "Stream", "Live", "Console"]
+    readonly property var modeKeys: ["text", "timeline", "controller", "stream", "live", "console", "canmon"]
+    readonly property var modeNames: ["Text", "Timeline", "Controller", "Stream", "Live", "Console", "CAN monitor"]
     property int current: Math.max(0, modeKeys.indexOf(Core.activeMode))
 
     function setMode(key) {
@@ -31,7 +31,7 @@ Card {
                 anchors.rightMargin: 6
                 spacing: 8
                 FlatCombo {
-                    Layout.preferredWidth: 118
+                    Layout.preferredWidth: 128
                     model: root.modeNames
                     currentIndex: root.current
                     onActivated: (i) => Core.activeMode = root.modeKeys[i]
@@ -56,6 +56,7 @@ Card {
             StreamMode {}
             LiveMode {}
             ConsoleMode {}
+            CanMonitorMode {}
         }
     }
 }

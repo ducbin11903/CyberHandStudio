@@ -4,7 +4,8 @@
 #include <QVariantList>
 #include <QVector>
 
-class SerialLink;
+class Transport;
+class CanBus;
 class ConsoleModel;
 class HandModel;
 
@@ -34,6 +35,8 @@ class HandController : public QObject
     Q_PROPERTY(int openPorts READ openPorts NOTIFY connectedChanged)
     // "2 cổng" mode: Connect opens port 1 and port 2
     Q_PROPERTY(bool dualPort READ dualPort WRITE setDualPort NOTIFY dualPortChanged)
+    // 0 = 1 USB port, 1 = 2 USB ports (U6 + U7), 2 = CAN (node 1 = U6, node 2 = U7)
+    Q_PROPERTY(int connectionMode READ connectionMode WRITE setConnectionMode NOTIFY dualPortChanged)
     // per port: open, name, label, mcu, keys, selected, peer, peerUp, id, main
     Q_PROPERTY(QVariantList ports READ ports NOTIFY portChanged)
     // MCU of the open ports ("U6", "U6+U7") and the joints they reach
@@ -54,10 +57,14 @@ public:
     enum Protocol { BenchSingle = 0, PerJoint = 1, OneLine = 2 };
     Q_ENUM(Protocol)
 
-    HandController(SerialLink *link, ConsoleModel *console, HandModel *hand, QObject *parent = nullptr);
+    HandController(Transport *link, ConsoleModel *console, HandModel *hand, QObject *parent = nullptr);
     // second USB port (2-port mode); index 1
-    void addLink(SerialLink *link);
-    SerialLink *linkAt(int port) const;
+    void addLink(Transport *link);
+    // CAN bus: in CAN mode its node 1 / node 2 links take the place of port 1 / port 2
+    void setCan(CanBus *bus);
+    CanBus *can() const { return m_can; }
+    bool useCan() const { return m_mode == 2; }
+    Q_INVOKABLE Transport *linkAt(int port) const;
 
     int protocol() const { return m_protocol; }
     void setProtocol(int p);
@@ -94,8 +101,10 @@ public:
     Q_INVOKABLE bool sendTo(int port, const QString &line);
     // every open port
     Q_INVOKABLE bool sendAll(const QString &line);
-    // every motor to duty 0 / off on every open port (G474: D, bench board: 0 then d)
+    // every motor to duty 0 / off on every open port (G474: D, bench board: 0 then d; CAN: D to 0x200)
     Q_INVOKABLE void stopAll();
+    // emergency stop: CAN frame 0x000, USB = stopAll()
+    Q_INVOKABLE bool estop();
 
     // e / d / c without a joint = every motor of the MCU (both MCUs with 2 ports)
     Q_INVOKABLE bool enable() { return sendAll(QStringLiteral("e")); }
@@ -135,8 +144,10 @@ public:
     bool connected() const;
     int openPorts() const;
     bool portOpen(int port) const;
-    bool dualPort() const { return m_dual; }
+    bool dualPort() const { return m_mode == 1; }
     void setDualPort(bool d);
+    int connectionMode() const { return m_mode; }
+    void setConnectionMode(int m);
     QVariantList ports() const;
     QString portMcu() const;
     QStringList portKeys() const;
@@ -192,7 +203,7 @@ signals:
 
 private:
     struct Port {
-        SerialLink *link = nullptr;
+        Transport *link = nullptr;
         QString mcu;        // ID mcu=
         QStringList keys;   // ID keys=
         QString selected;   // last m <key>
@@ -228,6 +239,10 @@ private:
     double m_powerRate = 50;
     QString m_last;
     QVector<double> m_lastSent;
-    bool m_dual = false;
+    int m_mode = 0;
+    Transport *m_serial[2] = {nullptr, nullptr};
+    CanBus *m_can = nullptr;
+    // CAN: joint targets as one POS_ALL frame (NaN = keep)
+    bool sendPosAll(const QVector<double> &deg, bool quiet);
     int m_consoleTarget = 0;
 };

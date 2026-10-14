@@ -159,6 +159,58 @@ Mô phỏng (`fw_sim.py --g474 ...`): log có `temp/rh/vbat`, `sense`, sự ki�
 lệnh thử `simtemp <C>`, `simvbat <V>`, `simsht off|on`; tham số `--temp`, `--vbat`. Ở chế độ 2 tiến trình
 (`--g474 U6` + `--g474 U7`) mỗi sim tự giả lập cảm biến (U6 không nhận được giá trị của U7), nên `simtemp` gửi cho từng cổng.
 
+## CAN v1 (fw 0.11-g474, Waveshare USB-CAN-FD)
+
+Bus: CAN FD ISO + BRS, trọng tài 1 Mbit/s, dữ liệu 2 Mbit/s, ID 11 bit, little-endian.
+Node 1 = U6 (I, T1, T2), node 2 = U7 (M, R, P). Số khớp: 1 T2, 2 T1, 3 I, 4 M, 5 R, 6 P.
+Đấu J11: 1 GND, 2 CANL, 3 CANH; một điện trở đầu cuối 120 Ω.
+
+| ID | Hướng | Len | Nội dung |
+|---|---|---|---|
+| 0x000 | host → tất cả | 0–1 | E-STOP: tắt mọi motor ngay, flt 4 |
+| 0x080 | host → tất cả | 1 | HOST_HB mỗi 100 ms, byte0 = seq. Mất > 300 ms → MCB tắt motor, flt 8 |
+| 0x100 | host → tất cả | 12 | POS_ALL: int16 q[6] (0.01°), khớp 1..6, 0x7FFF = giữ nguyên; không trả lời |
+| 0x200 | host → cả 2 MCU | ≤64 | CMD_TEXT: 1 dòng CLI, không CR/LF |
+| 0x200+n | host → MCU n | ≤64 | CMD_TEXT riêng MCU n |
+| 0x280+n | MCU n → host | ≤64 | TEXT: luồng ký tự, dòng kết thúc `\n`, 1 dòng có thể qua nhiều khung |
+| 0x300+n | MCU n → host | 64 | STATUS, tần số `canlog <hz>` (mặc định 50) |
+| 0x700+n / 0x780+n | | | ping / pong (app bỏ qua) |
+
+**STATUS** (64 byte)
+- `[0]` version = 1, `[1]` node, `[2..3]` seq u16
+- 3 khối × 14 byte từ `[4]`: `+0` số khớp, `+1` bit (b0 enabled, b1 homed, b2..3 mode 0 open / 1 PID / 2 home,
+  b4 DIAG thấp), `+2` flt, `+3` duty int8 %, `+4` pos int32, `+8` target int32 (= pos khi không PID), `+12` dòng int16 mA
+- `[46]` temp int16 0.1 °C (0x7FFF = không có), `[48]` RH u16 0.1 % (0xFFFF = không có), `[50]` VBAT u16 mV (0 = không có)
+- `[52]` bit: b0 quá nhiệt, b1 pin yếu, b2 link UART U6–U7 sống; `[56..59]` uptime u32 ms
+- Góc: deg = count × 90 / cnt90 (cnt90 từ dòng ID).
+
+Khung FD chỉ có độ dài 0–8, 12, 16, 20, 24, 32, 48, 64: phần thiếu đệm 0x00 (TEXT: bên nhận bỏ NUL và `\r`).
+
+**App** — Communication → Kết nối → **CAN**
+- Adapter "Waveshare USB-CAN-FD": thiết bị (mặc định 0), kênh CAN1/CAN2, bitrate trọng tài / dữ liệu,
+  "Điện trở 120 Ω — bật trên adapter" (`ZCAN_SetResistanceEnable`, mặc định bật: cùng 120 Ω phía MCB thành 60 Ω cho bus 2 đầu;
+  tắt nếu bus đã có 2 điện trở).
+  Cần `ControlCANFD.dll` **bản x64** (gói *USB-CAN-FD Library* của Waveshare, thư mục `x64/`): chép cạnh
+  `CyberHandStudio.exe`, hoặc vào `drivers\`, hoặc chọn file ở ô ControlCANFD.dll. Bản x86 không nạp được vào app 64-bit.
+- Khi Connect: gửi `i` và `canlog 50` tới từng node, chờ ID của cả hai (2 dòng trạng thái U6 / U7 như chế độ 2 cổng).
+- STATUS → dòng log kiểu USB (`en,duty,out,i_mA,flt,diag,pos,tgt,mode` của khớp chính, `qN,tN,iN`, `temp,rh,vbat`)
+  → cùng đường Telemetry / Live / Board như USB. Log rate (Settings) gửi `canlog <hz>`.
+- Stream, thanh trượt, Text/Timeline, pose → POS_ALL theo Motion Send Rate (tối đa 100 Hz, gộp giá trị mới nhất);
+  1 khớp = POS_ALL với 5 khớp còn lại 0x7FFF.
+- Enable/Disable/Home/Zero/PID/`x o v j I a` → CMD_TEXT tới MCU của khớp chọn, trước đó `m <khớp>`.
+  Enable/Disable cả tay, Disconnect (`D`) → 0x200.
+- Console: đích Tự động / U6 / U7 / Cả hai (0x200); dòng nhận gắn [U6] / [U7].
+- HOST_HB chạy trong luồng CAN riêng (không phụ thuộc UI). Nút ■ cạnh Connect và phím **Esc** = E-STOP (0x000).
+- Thống kê: khung/s RX/TX, STATUS mất theo seq từng node, trạng thái lỗi bus (TEC/REC, error passive, bus-off;
+  đọc bằng `ZCAN_ReadChannelErrInfo` của DLL, có trong DLL nhưng không có trong header).
+- Mode **CAN monitor**: khung thô (thời gian, Rx/Tx, ID, len, FD/BRS, hex, giải mã), lọc ID (`281 282 300-3FF !080`),
+  tạm dừng, gửi khung tay (ID hex, data hex, FD, BRS).
+
+**Bus ảo (không cần adapter)**: `python tools/fw_sim.py --can-udp 7470` giả lập 2 node, app chọn adapter "Ảo (UDP)"
+127.0.0.1:7470 (hoặc `CyberHandStudio --can udp:7470`). Mỗi khung = 1 datagram:
+`"CF"` u8 flags (b0 FD, b1 BRS, b2 EXT) u8 len u32 id (LE) data[len]. Sim học địa chỉ app từ datagram đầu tiên;
+lệnh thử `simdrop <n>` làm STATUS kế tiếp nhảy seq n (kiểm tra bộ đếm mất khung).
+
 ## CSV quỹ đạo (chế độ Text)
 
 ```

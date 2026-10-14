@@ -14,6 +14,14 @@ ToolWindow {
     minimumWidth: 600
     minimumHeight: 380
 
+    // the two text channels: serial ports, or the CAN nodes
+    QtObject {
+        id: dm
+        readonly property bool can: Core.ctrl.connectionMode === 2
+        readonly property var l1: can ? Core.can.node1 : Core.link
+        readonly property var l2: can ? Core.can.node2 : Core.link2
+    }
+
     property var stats: ({})
     property var names: []
 
@@ -95,17 +103,23 @@ ToolWindow {
                     var p = Core.ctrl.ports
                     for (var i = 0; i < p.length; ++i)
                         if (p[i].open) l.push(p[i].name + (p[i].mcu.length ? " (" + p[i].mcu + ")" : ""))
-                    return l.length ? l.join(" + ") + " @ " + Core.link.baudRate : "—"
+                    if (!l.length)
+                        return "—"
+                    return l.join(" + ") + (dm.can ? " · " + Core.can.description : " @ " + Core.link.baudRate)
                 }
             }
             Stat { title: qsTr("Log"); value: Core.telemetry.sampleRate.toFixed(0) + " Hz" }
-            Stat { title: qsTr("Dòng/s"); value: (Core.link.linesPerSec + Core.link2.linesPerSec).toFixed(1) }
-            Stat { title: qsTr("RX"); value: Math.round(Core.link.rxBytesPerSec + Core.link2.rxBytesPerSec) + " B/s" }
+            Stat { title: qsTr("Dòng/s"); value: (dm.l1.linesPerSec + dm.l2.linesPerSec).toFixed(1) }
+            Stat {
+                title: dm.can ? qsTr("CAN") : qsTr("RX")
+                value: dm.can ? qsTr("%1 khung/s · mất %2").arg(Math.round(Core.can.rxFramesPerSec)).arg(Core.can.statusLost)
+                              : Math.round(dm.l1.rxBytesPerSec + dm.l2.rxBytesPerSec) + " B/s"
+            }
             Stat {
                 title: qsTr("Dòng cuối")
                 value: {
-                    var a = Core.link.connected ? Core.link.lastLineAgeMs : -1
-                    var b = Core.link2.connected ? Core.link2.lastLineAgeMs : -1
+                    var a = dm.l1.connected ? dm.l1.lastLineAgeMs : -1
+                    var b = dm.l2.connected ? dm.l2.lastLineAgeMs : -1
                     var m = Math.max(a, b)
                     return m < 0 ? "—" : m + " ms"
                 }

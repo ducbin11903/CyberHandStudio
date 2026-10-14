@@ -8,6 +8,7 @@
 
 #include "BoardMonitor.h"
 #include "CadModel.h"
+#include "CanBus.h"
 #include "Calibration.h"
 #include "ConfigStore.h"
 #include "ConsoleModel.h"
@@ -35,6 +36,8 @@ class AppCore : public QObject
     Q_PROPERTY(SerialLink *link READ link CONSTANT)
     // second USB port (2-port mode: one port per MCU)
     Q_PROPERTY(SerialLink *link2 READ link2 CONSTANT)
+    // CAN connection (Waveshare USB-CAN-FD / UDP virtual bus), MCB CAN v1
+    Q_PROPERTY(CanBus *can READ can CONSTANT)
     Q_PROPERTY(ConsoleModel *console READ console CONSTANT)
     Q_PROPERTY(HandModel *hand READ hand CONSTANT)
     Q_PROPERTY(Telemetry *telemetry READ telemetry CONSTANT)
@@ -80,6 +83,11 @@ public:
     QString version() const { return QStringLiteral(CH_VERSION); }
     SerialLink *link() const { return m_link; }
     SerialLink *link2() const { return m_link2; }
+    CanBus *can() const { return m_can; }
+    // "udp", "udp:7470", "udp:127.0.0.1:7470", "waveshare", "waveshare:0" (command line --can)
+    void openCanAtStart(const QString &spec);
+    // E-STOP: stop playback, CAN frame 0x000 (USB: D / 0 + d on every port)
+    Q_INVOKABLE void estop();
     // Connect / Disconnect: port 1, plus port 2 in 2-port mode
     Q_INVOKABLE bool toggleConnection();
     void openPort2AtStart(const QString &port);
@@ -129,6 +137,7 @@ public:
     Q_INVOKABLE void setUiValue(const QString &key, const QVariant &value);
     Q_INVOKABLE QVariant uiValue(const QString &key, const QVariant &fallback = QVariant()) const;
     Q_INVOKABLE QString fileName(const QString &pathOrUrl) const;
+    Q_INVOKABLE QString localPath(const QString &pathOrUrl) const;
     Q_INVOKABLE void saveNow() { m_config->save(); }
 
 signals:
@@ -160,6 +169,9 @@ private:
 
     SerialLink *m_link;
     SerialLink *m_link2;
+    CanBus *m_can;
+    // a connection session is open (first port up .. last port down)
+    bool m_session = false;
     ConsoleModel *m_console;
     HandModel *m_hand;
     Telemetry *m_telemetry;

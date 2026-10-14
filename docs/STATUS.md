@@ -54,6 +54,17 @@ Cập nhật: 2026-09-27
 - Mô phỏng khi đang kết nối: Output tắt (Timeline/Text/Manual/Controller) hoặc Stream không Mirror → 3D chạy theo lệnh,
   bóng xanh = tay thật.
 
+### 0.6.0 — CAN (Waveshare USB-CAN-FD, giao thức CAN v1, fw 0.11)
+
+- Kết nối thứ 3 "CAN" cạnh 1 cổng / 2 cổng: lớp Transport chung cho SerialLink và node CAN.
+- CanBus: luồng riêng (thu 1 ms, HOST_HB 100 ms, trạng thái bus 500 ms), ControlCANFD.dll x64 qua QLibrary,
+  backend UDP ảo; thống kê khung/s, STATUS mất theo seq, TEC/REC / passive / bus-off.
+- POS_ALL ≤ 100 Hz, CMD_TEXT theo MCU của khớp (`m <khớp>` trước), 0x200 cho cả tay, TEXT nhiều khung → [U6]/[U7],
+  STATUS → dòng log USB (Telemetry, Board), E-STOP 0x000 (nút ■ + Esc), `i` + `canlog 50` khi kết nối.
+- Mode CAN monitor. fw_sim `--can-udp`. Test: giải mã STATUS (thiếu cảm biến), POS_ALL 0x7FFF, TEXT nhiều khung, đếm mất seq,
+  cả tay qua bus ảo.
+- Chưa thử với adapter thật.
+
 ## Giả định cần Duc xác nhận
 
 - (đã xác nhận) T1 = xoay ngón cái (Thumb Rotation, opposition), T2 = gập ngón cái (Thumb Flexion).

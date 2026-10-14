@@ -2,10 +2,14 @@
 #include <QSignalSpy>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QtEndian>
 #include <QtTest>
 
 #include "core/AppCore.h"
 #include "core/BoardMonitor.h"
+#include "core/CanBackend.h"
+#include "core/CanBus.h"
+#include "core/CanProtocol.h"
 #include "core/EventLog.h"
 #include "core/Recorder.h"
 #include "core/CadModel.h"
@@ -962,6 +966,271 @@ private slots:
         QVERIFY(core.simulating());
         core.setManualPreview(false);
         QVERIFY(!core.simulating());
+    }
+
+    void canStatusDecode()
+    {
+        // hand-built frame: checks the byte offsets of the spec, not just a round trip
+        QByteArray d(64, '\0');
+        auto *p = reinterpret_cast<uchar *>(d.data());
+        p[0] = 1;            // version
+        p[1] = 1;            // node U6
+        qToLittleEndian<quint16>(513, p + 2);
+        // block 0: joint 3 (I), enabled + homed + PID, flt 16, duty -10, pos 3500, tgt 3600, 120 mA
+        p[4] = 3;
+        p[5] = 0x01 | 0x02 | (1 << 2);
+        p[6] = 16;
+        p[7] = uchar(qint8(-10));
+        qToLittleEndian<qint32>(3500, p + 8);
+        qToLittleEndian<qint32>(3600, p + 12);
+        qToLittleEndian<qint16>(120, p + 16);
+        // block 1: joint 2 (T1), DIAG low, pos -40
+        p[18] = 2;
+        p[19] = 0x10;
+        qToLittleEndian<qint32>(-40, p + 22);
+        qToLittleEndian<qint32>(-40, p + 26);
+        // block 2: joint 1 (T2)
+        p[32] = 1;
+        // sensors missing
+        qToLittleEndian<qint16>(0x7FFF, p + 46);
+        qToLittleEndian<quint16>(0xFFFF, p + 48);
+        qToLittleEndian<quint16>(0, p + 50);
+        p[52] = 0x04; // link U6-U7 alive
+        qToLittleEndian<quint32>(123456, p + 56);
+
+        CanV1::Status s;
+        QVERIFY(CanV1::decodeStatus(d, &s));
+        QCOMPARE(s.node, 1);
+        QCOMPARE(int(s.seq), 513);
+        QCOMPARE(s.joints[0].joint, 3);
+        QVERIFY(s.joints[0].enabled);
+        QVERIFY(s.joints[0].homed);
+        QCOMPARE(s.joints[0].mode, 1);
+        QCOMPARE(s.joints[0].flt, 16);
+        QCOMPARE(s.joints[0].duty, -10);
+        QCOMPARE(int(s.joints[0].pos), 3500);
+        QCOMPARE(int(s.joints[0].target), 3600);
+        QCOMPARE(s.joints[0].currentMa, 120);
+        QVERIFY(s.joints[1].diagLow);
+        QCOMPARE(int(s.joints[1].pos), -40);
+        QVERIFY(qIsNaN(s.temp));
+        QVERIFY(qIsNaN(s.rh));
+        QVERIFY(qIsNaN(s.vbat));
+        QVERIFY(s.linkOk);
+        QCOMPARE(s.uptimeMs, quint32(123456));
+        // as a log line: head = main joint I, no sensor fields when missing
+        const QString line = CanV1::statusToLogLine(s, 3);
+        const ParsedLine pl = LineParser::parse(line);
+        QVERIFY(pl.telemetry);
+        auto field = [&](const char *n) { return pl.values.value(pl.names.indexOf(QLatin1String(n)), qQNaN()); };
+        QCOMPARE(field("pos"), 3500.0);
+        QCOMPARE(field("tgt"), 3600.0);
+        QCOMPARE(field("mode"), 1.0);
+        QCOMPARE(field("flt"), 16.0);
+        QCOMPARE(field("q3"), 3500.0);
+        QCOMPARE(field("i3"), 120.0);
+        QCOMPARE(field("q2"), -40.0);
+        QVERIFY(!pl.names.contains(QStringLiteral("temp")));
+        QVERIFY(!pl.names.contains(QStringLiteral("vbat")));
+        // with sensors: round trip
+        s.temp = 31.5;
+        s.rh = 44.2;
+        s.vbat = 7.96;
+        CanV1::Status r;
+        QVERIFY(CanV1::decodeStatus(CanV1::encodeStatus(s), &r));
+        QCOMPARE(r.temp, 31.5);
+        QCOMPARE(r.rh, 44.2);
+        QCOMPARE(r.vbat, 7.96);
+        QVERIFY(CanV1::statusToLogLine(r, 3).contains(QStringLiteral("temp:31.5,rh:44.2,vbat:7.96")));
+        // wrong version / short frame
+        d[0] = 2;
+        QVERIFY(!CanV1::decodeStatus(d, &s));
+        QVERIFY(!CanV1::decodeStatus(QByteArray(20, '\0'), &s));
+    }
+
+    void canPosAllAndText()
+    {
+        const QByteArray d = CanV1::encodePosAll({qQNaN(), qQNaN(), 45.0, qQNaN(), -1.5, qQNaN()});
+        QCOMPARE(d.size(), 12);
+        QCOMPARE(qFromLittleEndian<qint16>(d.constData() + 0), qint16(0x7FFF));
+        QCOMPARE(qFromLittleEndian<qint16>(d.constData() + 4), qint16(4500));
+        QCOMPARE(qFromLittleEndian<qint16>(d.constData() + 8), qint16(-150));
+        QCOMPARE(qFromLittleEndian<qint16>(d.constData() + 10), qint16(0x7FFF));
+        const QVector<double> q = CanV1::decodePosAll(d);
+        QVERIFY(qIsNaN(q[0]));
+        QCOMPARE(q[2], 45.0);
+        QCOMPARE(q[4], -1.5);
+        // FD lengths
+        QCOMPARE(CanV1::fdLength(9), 12);
+        QCOMPARE(CanV1::fdLength(33), 48);
+        QCOMPARE(CanV1::fdLength(65), -1);
+        const QVector<CanV1::Frame> t = CanV1::encodeText(2, QStringLiteral("H 30 250"));
+        QCOMPARE(t.size(), 1);
+        QCOMPARE(t[0].id, quint32(0x202));
+        QCOMPARE(t[0].data.size(), 8);
+        QCOMPARE(CanV1::encodeText(1, QStringLiteral("x 55 extra")).first().data.size(), 12); // padded
+        // TEXT reassembly: a line across frames, padding, CR
+        CanV1::TextAssembler a;
+        QVERIFY(a.feed(QByteArray("OK e a")).isEmpty());
+        QByteArray chunk("ll\r\nHOME: done\nOVE");
+        chunk.append(QByteArray(5, '\0'));
+        QCOMPARE(a.feed(chunk), (QStringList{QStringLiteral("OK e all"), QStringLiteral("HOME: done")}));
+        QCOMPARE(a.feed(QByteArray("RI: retract\n")), QStringList{QStringLiteral("OVERI: retract")});
+        // STATUS frames lost by seq, with u16 wrap
+        CanV1::SeqCounter c;
+        for (quint16 v : {quint16(1), quint16(2), quint16(5), quint16(6)})
+            c.feed(v);
+        QCOMPARE(c.lost(), quint64(2));
+        c.reset();
+        for (quint16 v : {quint16(65534), quint16(65535), quint16(1)})
+            c.feed(v);
+        QCOMPARE(c.lost(), quint64(1));
+        QCOMPARE(c.received(), quint64(3));
+        // monitor filter
+        CanV1::IdFilter f(QStringLiteral("280-2FF, 0x301 !282"));
+        QVERIFY(f.accepts(0x281));
+        QVERIFY(!f.accepts(0x282));
+        QVERIFY(f.accepts(0x301));
+        QVERIFY(!f.accepts(0x080));
+        // UDP virtual bus datagram
+        CanV1::Frame fr;
+        fr.id = 0x301;
+        fr.data = QByteArray(64, '\x5A');
+        CanV1::Frame back;
+        QVERIFY(CanUdp::decode(CanUdp::encode(fr), &back));
+        QCOMPARE(back.id, fr.id);
+        QCOMPARE(back.data, fr.data);
+        QVERIFY(back.fd && back.brs);
+    }
+
+    void canHandOverBus()
+    {
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        HandModel *hand = core.hand();
+        HandController *ctrl = core.ctrl();
+        CanBus *bus = core.can();
+        auto J = [hand](const char *k) { return hand->indexOfKey(QLatin1String(k)); };
+        auto text = [](const CanV1::Frame &f) { QString s = QString::fromUtf8(f.data); s.remove(QChar(0)); return s; };
+        auto sentAs = [&](quint32 id) {
+            QStringList l;
+            for (const CanV1::Frame &f : bus->virtualSent())
+                if (f.id == id)
+                    l << text(f);
+            return l;
+        };
+        auto rx = [bus](quint32 id, const QByteArray &d) {
+            CanV1::Frame f;
+            f.id = id;
+            f.data = d;
+            bus->injectFrame(f);
+        };
+        hand->setBenchJoint(J("I"));
+        ctrl->setConnectionMode(2);
+        QVERIFY(ctrl->useCan());
+        bus->openVirtual();
+        QVERIFY(ctrl->connected());
+        QCOMPARE(ctrl->openPorts(), 2);
+        // at connect: i + canlog 50 to each node
+        QCOMPARE(sentAs(0x201), (QStringList{QStringLiteral("i"), QStringLiteral("canlog 50")}));
+        QCOMPARE(sentAs(0x202), (QStringList{QStringLiteral("i"), QStringLiteral("canlog 50")}));
+        bus->clearVirtualSent();
+        // ID lines arrive as TEXT, split over frames
+        rx(0x281, "ID: CyberHand-G474 fw 0.11-g474 joints=3 cnt90=7000 ");
+        rx(0x281, "mcu=U6 motor=1(I) keys=I,T1,T2\n");
+        rx(0x282, "ID: CyberHand-G474 fw 0.11-g474 joints=3 cnt90=7000 mcu=U7 motor=1(M) keys=M,R,P\n");
+        QCOMPARE(ctrl->portMcu(), QStringLiteral("U6+U7"));
+        for (int i = 0; i < hand->count(); ++i)
+            QVERIFY(!hand->joint(i)->offPort());
+        // calibration push per node, sense to U7 (fw >= 0.9)
+        QVERIFY(sentAs(0x201).contains(QStringLiteral("m T1")));
+        QVERIFY(sentAs(0x202).contains(QStringLiteral("j 7000")));
+        QVERIFY(sentAs(0x202).contains(QStringLiteral("sense")));
+        bus->clearVirtualSent();
+
+        // streaming: one POS_ALL with every joint
+        ctrl->sendJoints({10, 20, 30, 40, 50, 60}, true, true);
+        QCOMPARE(bus->virtualSent().size(), 1);
+        QCOMPARE(bus->virtualSent()[0].id, quint32(0x100));
+        QVector<double> q = CanV1::decodePosAll(bus->virtualSent()[0].data);
+        QCOMPARE(q, (QVector<double>{10, 20, 30, 40, 50, 60}));
+        // one joint: the rest 0x7FFF
+        bus->clearVirtualSent();
+        QVERIFY(ctrl->moveJoint(J("M"), 45));
+        q = CanV1::decodePosAll(bus->virtualSent()[0].data);
+        QCOMPARE(q[3], 45.0);
+        QVERIFY(qIsNaN(q[0]) && qIsNaN(q[2]) && qIsNaN(q[5]));
+        // whole hand on/off: 0x200
+        bus->clearVirtualSent();
+        QVERIFY(ctrl->enable());
+        QCOMPARE(sentAs(0x200), QStringList{QStringLiteral("e")});
+        // single-motor commands go to the MCU of the main joint, after m <key>
+        bus->clearVirtualSent();
+        QVERIFY(ctrl->home());
+        QVERIFY(sentAs(0x201).last().startsWith(QLatin1String("H")));
+        hand->setBenchJoint(J("R"));
+        QVERIFY(ctrl->setDuty(20));
+        QCOMPARE(sentAs(0x202), (QStringList{QStringLiteral("m R"), QStringLiteral("o 20")}));
+        QVERIFY(sentAs(0x201).last().startsWith(QLatin1String("H")));
+        // console: typed line to both = one 0x200 frame
+        bus->clearVirtualSent();
+        ctrl->setConsoleTarget(3);
+        QVERIFY(ctrl->sendConsole(QStringLiteral("c")));
+        QCOMPARE(sentAs(0x200), QStringList{QStringLiteral("c")});
+        ctrl->setConsoleTarget(0);
+        // Position Sample Rate -> canlog
+        bus->clearVirtualSent();
+        ctrl->setLogRate(25);
+        QVERIFY(ctrl->applyLogRate());
+        QCOMPARE(sentAs(0x200), QStringList{QStringLiteral("canlog 25")});
+
+        // STATUS of both nodes -> joint feedback, board sensors from U7
+        CanV1::Status s6;
+        s6.version = 1;
+        s6.node = 1;
+        s6.seq = 1;
+        s6.joints[0] = {3, true, true, 1, false, 0, 5, 3500, 3500, 80};
+        s6.joints[1] = {2, true, true, 1, false, 0, 0, 0, 0, 0};
+        s6.joints[2] = {1, true, true, 1, false, 0, 0, 0, 0, 0};
+        CanV1::Status s7 = s6;
+        s7.node = 2;
+        s7.joints[0] = {4, true, true, 1, false, 0, 5, 7000, 7000, 90};
+        s7.joints[1] = {5, true, true, 1, false, 0, 5, 1750, 1750, 70};
+        s7.joints[2] = {6, true, true, 1, false, 0, 0, 0, 0, 0};
+        s7.temp = 30.2;
+        s7.vbat = 8.01;
+        s6.temp = 30.2;
+        s6.vbat = 8.01;
+        rx(0x302, CanV1::encodeStatus(s7));
+        rx(0x301, CanV1::encodeStatus(s6));
+        s7.seq = 4; // 2 frames lost on U7
+        rx(0x302, CanV1::encodeStatus(s7));
+        auto deg = [hand, J](const char *k) { return hand->joint(J(k))->measuredDeg(); };
+        QCOMPARE(deg("I"), 45.0);
+        QCOMPARE(deg("M"), 90.0);
+        QCOMPARE(deg("R"), 22.5);
+        QCOMPARE(core.board()->temp(), 30.2);
+        QCOMPARE(core.board()->source(), QStringLiteral("U7"));
+        QCOMPARE(bus->statusLost(), qint64(2));
+        // TEXT events reach the parsers, tagged by node
+        QSignalSpy home(core.telemetry(), &Telemetry::homeResult);
+        rx(0x281, "HOME I: done\n");
+        QCOMPARE(home.count(), 1);
+        const QModelIndex last = core.console()->index(core.console()->rowCount() - 1);
+        QCOMPARE(last.data(ConsoleModel::SrcRole).toString(), QStringLiteral("U6"));
+
+        // E-STOP: frame 0x000, no data
+        bus->clearVirtualSent();
+        core.estop();
+        QCOMPARE(bus->virtualSent().size(), 1);
+        QCOMPARE(bus->virtualSent()[0].id, quint32(0x000));
+        QVERIFY(bus->virtualSent()[0].data.isEmpty());
+        // Disconnect: D to both, then closed
+        bus->clearVirtualSent();
+        QVERIFY(!core.toggleConnection());
+        QCOMPARE(sentAs(0x200), QStringList{QStringLiteral("D")});
+        QVERIFY(!ctrl->connected());
+        QVERIFY(!bus->connected());
     }
 
     void llmExtract()
