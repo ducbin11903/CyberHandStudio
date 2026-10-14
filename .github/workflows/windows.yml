@@ -118,10 +118,12 @@ jobs:
           done
           cat update.log || true
           sleep 8
-          tasklist //FI "IMAGENAME eq CyberHandStudio.exe" || true
-          taskkill //IM CyberHandStudio.exe //F || true
+          /c/Windows/System32/tasklist.exe //FI "IMAGENAME eq CyberHandStudio.exe" > ../tasks.log 2>&1 || true
+          cat ../tasks.log
+          /c/Windows/System32/taskkill.exe //IM CyberHandStudio.exe //F || true
           grep -q "done (robocopy" update.log
-          cmp README.md ../../dist/README.md
+          grep -q "CyberHandStudio.exe" ../tasks.log    # restarted
+          test "$(md5sum < README.md)" = "$(md5sum < ../../dist/README.md)"   # files replaced
           echo "update test ok"
 
       - name: Publish smoke result to branch ci-smoke
@@ -131,6 +133,7 @@ jobs:
           mkdir -p /tmp/smoke && cp smoke.png smoke.log /tmp/smoke/ 2>/dev/null || true
           cp upd/install.log /tmp/smoke/update_install.log 2>/dev/null || true
           cp upd/app/update.log /tmp/smoke/update.log 2>/dev/null || true
+          cp upd/tasks.log /tmp/smoke/update_tasks.log 2>/dev/null || true
           ls /tmp/smoke
           cd /tmp/smoke
           git init -q -b ci-smoke
