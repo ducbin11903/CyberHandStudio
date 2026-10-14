@@ -167,6 +167,15 @@ jobs:
           gh release create latest CyberHandStudio-win64.zip version.json \
             --prerelease --title "Latest build (main)" --notes-file notes.md
 
+      # the build just published, read back over HTTPS by the app (TLS, redirect, version.json)
+      - name: Check update over the network
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          sleep 5
+          cd dist
+          QT_FORCE_STDERR_LOGGING=1 ./CyberHandStudio.exe --check-update 2>&1 | tee ../check.log
+          grep -q "newer false" ../check.log
+
       - name: Publish tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         shell: bash

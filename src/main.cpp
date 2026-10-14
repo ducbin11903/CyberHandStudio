@@ -63,11 +63,24 @@ int main(int argc, char *argv[])
     // in-app update: the copy script restarts the app with --updated / --update-failed
     QCommandLineOption updatedOpt(QStringLiteral("updated"), QStringLiteral("Started by the updater after a successful update"));
     QCommandLineOption updateFailedOpt(QStringLiteral("update-failed"), QStringLiteral("Started by the updater after a failed update"));
+    QCommandLineOption checkUpdateOpt(QStringLiteral("check-update"), QStringLiteral("Check GitHub for a newer build, print the result and exit (0 = checked)"));
     QCommandLineOption installUpdateOpt(QStringLiteral("install-update"), QStringLiteral("Install this CyberHandStudio-win64.zip over the app folder and restart (Windows)"), QStringLiteral("zip"));
     args.addOptions({portOpt, port2Opt, canOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt,
-                     updatedOpt, updateFailedOpt, installUpdateOpt});
+                     updatedOpt, updateFailedOpt, installUpdateOpt, checkUpdateOpt});
     args.process(app);
 
+    if (args.isSet(checkUpdateOpt)) {
+        Updater up;
+        QObject::connect(&up, &Updater::stateChanged, &app, [&up]() {
+            if (up.state() == Updater::Checking)
+                return;
+            qInfo().noquote() << "check-update: running" << up.currentText() << "| latest" << up.latestText()
+                              << "| newer" << up.available() << up.errorString();
+            QCoreApplication::exit(up.state() == Updater::UpToDate || up.state() == Updater::Available ? 0 : 1);
+        });
+        up.check(false);
+        return app.exec();
+    }
     if (args.isSet(installUpdateOpt)) {
         Updater up;
         QString err;
