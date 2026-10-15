@@ -610,18 +610,21 @@ Card {
                         label: qsTr("Duty vòng hở")
                         FlatSlider {
                             id: dutySlider
+                            // the duty the firmware reports; the slider follows it except while dragged
+                            // (and shortly after the release, until the new duty comes back in the log / STATUS)
+                            readonly property real fwDuty: Core.telemetry.hasData && Core.ctrl.connected ? Core.telemetry.duty : 0
                             Layout.fillWidth: true
                             from: -100; to: 100; stepSize: 1
                             centered: true
-                            value: Core.telemetry.hasData ? Core.telemetry.duty : 0
-                            onPressedChanged: if (!pressed) Core.ctrl.setDuty(value)
-                            // a drag breaks the binding: follow the firmware again (0 when disconnected)
-                            Connections {
-                                target: Core.ctrl
-                                function onConnectedChanged() {
-                                    dutySlider.value = Qt.binding(function() { return Core.telemetry.hasData ? Core.telemetry.duty : 0 })
+                            onFwDutyChanged: if (!pressed && !dutyHold.running) value = fwDuty
+                            Component.onCompleted: value = fwDuty
+                            onPressedChanged: {
+                                if (!pressed) {
+                                    Core.ctrl.setDuty(value)
+                                    dutyHold.restart()
                                 }
                             }
+                            Timer { id: dutyHold; interval: 600; onTriggered: dutySlider.value = dutySlider.fwDuty }
                         }
                         ValueBox { Layout.preferredWidth: 50; text: Math.round(dutySlider.value) + "%" }
                     }
