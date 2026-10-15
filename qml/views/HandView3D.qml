@@ -187,7 +187,8 @@ Card {
                 Rectangle { width: 7; height: 7; radius: 3.5; color: Theme.jointColor(index); anchors.verticalCenter: parent.verticalCenter }
                 TextLabel { text: modelData.key; width: 18; font.pixelSize: Theme.fontSmall; secondary: true }
                 TextLabel {
-                    text: Number(root.sim ? modelData.commandDeg : modelData.previewDeg).toFixed(1) + "°"
+                    // no "-0.0°" for a joint sitting a hair below zero
+                    text: Number(root.sim ? modelData.commandDeg : modelData.previewDeg).toFixed(1).replace(/^-0\.0$/, "0.0") + "°"
                     width: 44
                     horizontalAlignment: Text.AlignRight
                     font.pixelSize: Theme.fontSmall
