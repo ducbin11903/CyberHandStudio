@@ -52,6 +52,8 @@ class BoardMonitor : public QObject
     Q_PROPERTY(QString otempText READ otempText NOTIFY alarmChanged)
     Q_PROPERTY(QString vbatText READ vbatText NOTIFY alarmChanged)
     Q_PROPERTY(bool enableBlocked READ enableBlocked NOTIFY alarmChanged)
+    // firmware E-STOP latch (flt 4, `ESTOP:` / `ERR E-STOP latched`): `e` is refused until `c`
+    Q_PROPERTY(bool estopLatched READ estopLatched NOTIFY alarmChanged)
     Q_PROPERTY(QString blockReason READ blockReason NOTIFY alarmChanged)
     // sparklines: last 10 min, about 1 point per second
     Q_PROPERTY(QVariantList tempHistory READ tempHistory NOTIFY historyChanged)
@@ -102,7 +104,8 @@ public:
     int vbatState() const { return m_vbatSt; }
     QString otempText() const;
     QString vbatText() const;
-    bool enableBlocked() const { return m_otemp == 2 || m_vbatSt == 2; }
+    bool enableBlocked() const { return m_otemp == 2 || m_vbatSt == 2 || m_estop; }
+    bool estopLatched() const { return m_estop; }
     QString blockReason() const;
     QVariantList tempHistory() const { return toList(m_tempHist); }
     QVariantList vbatHistory() const { return toList(m_vbatHist); }
@@ -110,7 +113,7 @@ public:
 
     // one log line of a port (src = its MCU); fields absent = no value
     void updateFromLog(const QStringList &names, const QVector<double> &values, const QString &src);
-    // flt of the log: 16 OTEMP, 32 VBAT
+    // flt of the log: 4 ESTOP, 16 OTEMP, 32 VBAT
     void updateFault(int flt);
     // text line without the "[U7] " prefix; true for sense / OTEMP / VBAT / board ERR lines
     bool processText(const QString &line);
@@ -153,6 +156,8 @@ private:
     QString m_senseError;
     bool m_hot = false, m_low = false;
     int m_flt = 0;
+    bool m_estop = false;
+    QElapsedTimer m_estopSeen; // text said latched: a log line without flt 4 within 1 s does not clear it
     int m_otemp = 0, m_vbatSt = 0;
     double m_tripTemp = qQNaN(), m_tripVbat = qQNaN();
     QHash<QString, qint64> m_lastEvent; // "<cause>:<state>" -> ms, de-duplication

@@ -133,6 +133,36 @@ ApplicationWindow {
                 }
             }
 
+            // ---- E-STOP latched in the firmware: `e` is refused until `c` ------------
+            Rectangle {
+                visible: Core.board.estopLatched && Core.ctrl.connected
+                Layout.fillWidth: true
+                Layout.preferredHeight: 34
+                radius: Theme.radius
+                color: Theme.liveRed
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 8
+                    spacing: 10
+                    Icon { Layout.preferredWidth: 18; Layout.preferredHeight: 18; path: Icons.alert; color: Theme.textStrong }
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("E-STOP — mọi motor đã tắt. Xóa E-STOP rồi Enable để chạy lại.")
+                        color: Theme.textStrong
+                        font.family: Theme.fontFamily
+                        font.pixelSize: Theme.fontSize + 2
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                    FlatButton {
+                        text: qsTr("Xóa E-STOP")
+                        tip: qsTr("c tới mọi MCU (Clear fault)")
+                        onClicked: Core.ctrl.clearFault()
+                    }
+                }
+            }
+
             // ---- board protection banner (firmware switched all motors off) -----
             Repeater {
                 model: ["otemp", "vbat"]

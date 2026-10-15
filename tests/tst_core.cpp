@@ -1234,6 +1234,26 @@ private slots:
         QVERIFY(!bus->connected());
     }
 
+    void estopLatch()
+    {
+        BoardMonitor b(nullptr); // the controller is only used by refresh()
+        QVERIFY(!b.estopLatched());
+        b.updateFault(4);
+        QVERIFY(b.estopLatched());
+        QVERIFY(b.enableBlocked());
+        QVERIFY(b.blockReason().contains(QStringLiteral("E-STOP")));
+        b.updateFault(0); // after `c`
+        QVERIFY(!b.estopLatched());
+        QVERIFY(b.blockReason().isEmpty());
+        // refusal text: latched, and a log line still without flt 4 right after does not clear it
+        QVERIFY(!b.processText(QStringLiteral("ERR E-STOP latched (flt 4), send c first")));
+        QVERIFY(b.estopLatched());
+        b.updateFault(0);
+        QVERIFY(b.estopLatched());
+        b.reset();
+        QVERIFY(!b.estopLatched());
+    }
+
     void updaterInfoAndNotes()
     {
         const QByteArray json = R"({"version":"0.7.0","build":61,"commit":"def5678aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",

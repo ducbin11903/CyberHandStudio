@@ -880,6 +880,8 @@ class CanNode:
             return self.g.ok("canlog %d Hz" % self.canlog)
         if c == "l":                   # text log goes to USB only, not on CAN
             return self.g.ok("log %s Hz (USB only, CAN uses canlog)" % (args[0] if args else "0"))
+        if c == "e" and any(ch.flt & 4 for ch in self.g.ch):   # E-STOP latched until `c`
+            return self.g.err("E-STOP latched (flt 4), send c first")
         if c == "simdrop":             # sim only: the next STATUS skips <n> sequence numbers
             self.drop = int(args[0]) if args and args[0].isdigit() else 1
             return self.g.ok("simdrop %d" % self.drop)

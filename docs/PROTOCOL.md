@@ -201,6 +201,8 @@ Khung FD chỉ có độ dài 0–8, 12, 16, 20, 24, 32, 48, 64: phần thiếu 
   Enable/Disable cả tay, Disconnect (`D`) → 0x200.
 - Console: đích Tự động / U6 / U7 / Cả hai (0x200); dòng nhận gắn [U6] / [U7].
 - HOST_HB chạy trong luồng CAN riêng (không phụ thuộc UI). Nút ■ cạnh Connect và phím **Esc** = E-STOP (0x000).
+- E-STOP chốt trong firmware (flt 4, `ESTOP: …`; `e` trả `ERR E-STOP latched (flt 4), send c first`): app hiện thanh đỏ
+  "E-STOP" với nút **Xóa E-STOP** (`c` tới mọi MCU), khóa các nút Enable cho tới khi flt 4 hết.
 - Thống kê: khung/s RX/TX, STATUS mất theo seq từng node, trạng thái lỗi bus (TEC/REC, error passive, bus-off;
   đọc bằng `ZCAN_ReadChannelErrInfo` của DLL, có trong DLL nhưng không có trong header).
 - Mode **CAN monitor**: khung thô (thời gian, Rx/Tx, ID, len, FD/BRS, hex, giải mã), lọc ID (`281 282 300-3FF !080`),

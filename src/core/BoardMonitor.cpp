@@ -187,6 +187,8 @@ QString BoardMonitor::vbatText() const
 QString BoardMonitor::blockReason() const
 {
     QStringList l;
+    if (m_estop)
+        l << tr("E-STOP đang chốt: bấm Xóa E-STOP (c) trước");
     if (m_otemp == 2)
         l << (qIsNaN(m_tOn) ? tr("Quá nhiệt: firmware giữ motor tắt cho tới khi nguội")
                             : tr("Quá nhiệt: firmware giữ motor tắt cho tới khi < %1 °C").arg(QString::number(m_tOn, 'f', 1)));
@@ -318,11 +320,29 @@ void BoardMonitor::updateFault(int flt)
     }
     if ((flt ^ prev) & (16 | 32))
         emit updated();
+    // E-STOP latch: set by flt 4, cleared when the log no longer has it (after `c`)
+    const bool textFresh = m_estopSeen.isValid() && m_estopSeen.elapsed() < 1000;
+    if ((flt & 4) && !m_estop) {
+        m_estop = true;
+        emit alarmChanged();
+    } else if (!(flt & 4) && m_estop && !textFresh) {
+        m_estop = false;
+        emit alarmChanged();
+    }
 }
 
 bool BoardMonitor::processText(const QString &line)
 {
     const QString s = line.trimmed();
+    if (s.startsWith(QLatin1String("ESTOP:"), Qt::CaseInsensitive)
+        || s.startsWith(QLatin1String("ERR E-STOP"), Qt::CaseInsensitive)) {
+        m_estopSeen.start();
+        if (!m_estop) {
+            m_estop = true;
+            emit alarmChanged();
+        }
+        return false; // still a normal console line
+    }
     Sense sense;
     if (parseSense(s, &sense)) {
         m_supported = true;
@@ -468,6 +488,8 @@ void BoardMonitor::reset()
     m_senseError.clear();
     m_hot = m_low = false;
     m_flt = 0;
+    m_estop = false;
+    m_estopSeen.invalidate();
     m_otemp = m_vbatSt = 0;
     m_tripTemp = m_tripVbat = qQNaN();
     m_lastEvent.clear();
