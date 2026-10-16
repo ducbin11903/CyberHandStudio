@@ -1,0 +1,13 @@
+08:38:04  app 0.8.1 · build 25 · 0a01904 -> zip
+08:38:06  script: waiting for the app (pid 2404) to close
+08:38:06  copy D:\a\_temp\msys64\tmp\CyberHandStudio-update\stage -> D:\a\CyberHandStudio\CyberHandStudio\upd\app
+08:38:07    ------------------------------------------------------------------------------
+08:38:07    Total    Copied   Skipped  Mismatch    FAILED    Extras
+08:38:07    Dirs :        77         0        77         0         0         0
+08:38:07    Files :      1513      1513         0         0         0         1
+08:38:07    Bytes :  161.37 m  161.37 m         0         0         0       225
+08:38:07    Times :   0:00:00   0:00:00                       0:00:00   0:00:00
+08:38:07    Speed :           581,488,250 Bytes/sec.
+08:38:07    Speed :            33,273.023 MegaBytes/min.
+08:38:07    Ended : Friday, October 16, 2026 8:38:07 AM
+08:38:07  done (robocopy 3), starting the app
