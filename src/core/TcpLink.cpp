@@ -22,8 +22,8 @@ TcpLink::TcpLink(QObject *parent)
     m_statsTimer.setInterval(1000);
     connect(&m_statsTimer, &QTimer::timeout, this, &TcpLink::updateStats);
     m_statsTimer.start();
-    m_watch.setInterval(250);
-    connect(&m_watch, &QTimer::timeout, this, &TcpLink::checkSilence);
+    m_watch.setInterval(100);
+    connect(&m_watch, &QTimer::timeout, this, &TcpLink::tick);
 }
 
 TcpLink::~TcpLink()
@@ -54,6 +54,24 @@ void TcpLink::setPort(int p)
     m_port = p;
     emit settingsChanged();
     emit portNameChanged();
+}
+
+void TcpLink::setTimeoutEnabled(bool on)
+{
+    if (on == m_timeoutOn)
+        return;
+    m_timeoutOn = on;
+    if (on)
+        m_lastRx.start(); // count from now, not from the last byte before it was turned on
+    emit settingsChanged();
+}
+
+void TcpLink::setShowKeepalive(bool on)
+{
+    if (on == m_showKeepalive)
+        return;
+    m_showKeepalive = on;
+    emit settingsChanged();
 }
 
 void TcpLink::setSilenceTimeoutMs(int ms)
@@ -119,7 +137,8 @@ void TcpLink::connectNow()
     m_dropping = false;
     m_rxBuf.clear();
     m_lastWasCR = false;
-    m_gotData = false;
+    m_rtt = -1;
+    m_pingSent.invalidate();
     m_connectTimeout.start();
     emit stateChanged();
     m_sock->connectToHost(m_host, quint16(m_port));
@@ -131,7 +150,8 @@ void TcpLink::onConnected()
     // commands are short and must go out at once (no Nagle), keep-alive for a dead peer
     m_sock->setSocketOption(QAbstractSocket::LowDelayOption, 1);
     m_sock->setSocketOption(QAbstractSocket::KeepAliveOption, 1);
-    m_lastRx.start();
+    m_lastRx.start();   // the 3 s count starts at the connection
+    m_lastTx.start();
     m_watch.start();
     setError(QString());
     setConnected(true);
@@ -164,12 +184,28 @@ void TcpLink::scheduleRetry()
     emit statsChanged();
 }
 
-void TcpLink::checkSilence()
+void TcpLink::tick()
 {
-    if (!m_connected || m_silenceMs <= 0 || !m_gotData)
+    if (!m_connected)
         return;
-    if (m_lastRx.elapsed() > m_silenceMs)
-        onDropped(tr("mất liên lạc: không có dữ liệu %1 s").arg(m_silenceMs / 1000.0, 0, 'f', 1));
+    // keep-alive: only when nothing else went out for a second
+    if (m_pingMs > 0 && m_lastTx.elapsed() >= m_pingMs)
+        sendPing();
+    if (m_timeoutOn && m_silenceMs > 0 && m_lastRx.elapsed() > m_silenceMs)
+        onDropped(tr("mất liên lạc: không nhận được byte nào trong %1 s").arg(m_silenceMs / 1000.0, 0, 'f', 1));
+}
+
+void TcpLink::sendPing()
+{
+    const qint64 n = m_sock->write("ping\n");
+    m_lastTx.start();
+    if (n < 0)
+        return;
+    m_txBytes += n;
+    if (!m_pingSent.isValid())
+        m_pingSent.start(); // round trip of the oldest unanswered ping
+    if (m_showKeepalive)
+        emit lineSent(QStringLiteral("ping"), false);
 }
 
 void TcpLink::setConnected(bool c)
@@ -199,6 +235,7 @@ bool TcpLink::sendLine(const QString &text, bool quiet)
         return false;
     }
     m_txBytes += n;
+    m_lastTx.start();
     emit lineSent(text, quiet);
     return true;
 }
@@ -209,8 +246,7 @@ void TcpLink::onReadyRead()
     if (chunk.isEmpty())
         return;
     m_rxBytes += chunk.size();
-    m_gotData = true;
-    m_lastRx.start();
+    m_lastRx.start();   // any byte back = link alive
     const double t = m_clock.isValid() ? m_clock.nsecsElapsed() / 1e9 : 0.0;
     // a line may arrive in pieces, several lines in one piece: rebuild them here
     for (char c : chunk) {
@@ -223,8 +259,18 @@ void TcpLink::onReadyRead()
             if (!m_rxBuf.isEmpty()) {
                 const QString line = QString::fromUtf8(m_rxBuf);
                 m_rxBuf.clear();
-                ++m_lines;
                 m_lastLine.start();
+                if (isKeepalive(line)) {
+                    // ping echoed by the ESP, or pong from the MainBoard
+                    if (m_pingSent.isValid()) {
+                        m_rtt = int(m_pingSent.elapsed());
+                        m_pingSent.invalidate();
+                    }
+                    if (!m_showKeepalive)
+                        continue;
+                } else {
+                    ++m_lines;
+                }
                 emit lineReceived(line, t);
             }
         } else {

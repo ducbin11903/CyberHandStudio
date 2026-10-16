@@ -134,6 +134,8 @@ class Firmware:
             except (IndexError, ValueError):
                 return default
 
+        if c == "ping":            # app keep-alive over WiFi
+            return self.write("pong")
         if c == "h":
             for l in HELP.strip("\n").split("\n"):
                 self.write(l)
@@ -586,7 +588,9 @@ class G474:
     def command(self, line):
         parts = line.split()
         c, args = parts[0], parts[1:]
-        if c == "i":
+        if c == "ping":            # app keep-alive over WiFi
+            self.write("pong")
+        elif c == "i":
             self.write(self.id_line())
         elif c == "h":
             for l in HELP_G474.strip("\n").split("\n"):

@@ -1245,9 +1245,11 @@ private slots:
         link.setHost(QStringLiteral("127.0.0.1"));
         link.setPort(srv.serverPort());
         link.setRetryIntervalMs(100);
-        link.setSilenceTimeoutMs(0);
-        QStringList got;
+        link.setPingIntervalMs(200);
+        link.setTimeoutEnabled(false);
+        QStringList got, sent;
         connect(&link, &Transport::lineReceived, this, [&got](const QString &l, double) { got << l; });
+        connect(&link, &Transport::lineSent, this, [&sent](const QString &l, bool) { sent << l; });
         QVERIFY(link.open());
         QVERIFY(link.busy());
         QTRY_VERIFY(srv.hasPendingConnections());
@@ -1255,6 +1257,8 @@ private slots:
         QTRY_VERIFY(link.connected());
         QVERIFY(link.noDelay());
         QCOMPARE(link.kind(), QStringLiteral("wifi"));
+        QByteArray rx; // everything the "module" received
+        auto drain = [&]() { rx += c->readAll(); return rx; };
 
         // TCP is a byte stream: a line split over several recv(), several lines in one
         c->write("ID: Cyber");
@@ -1269,8 +1273,28 @@ private slots:
         QCOMPARE(got, (QStringList{QStringLiteral("ID: CyberHand-G474 fw 0.11"), QStringLiteral("OK e all"),
                                    QStringLiteral("en:1,duty:0")}));
         QVERIFY(link.sendLine(QStringLiteral("e")));
-        QTRY_VERIFY(c->bytesAvailable() >= 2);
-        QCOMPARE(c->readAll(), QByteArray("e\n"));
+        QTRY_VERIFY(drain().contains("e\n"));
+
+        // keep-alive: `ping` once a second when nothing else went out, not shown in the console
+        rx.clear();
+        QTRY_VERIFY_WITH_TIMEOUT(drain().contains("ping\n"), 2000);
+        QVERIFY(!sent.contains(QStringLiteral("ping")));
+        c->write("ping\n"); // ESP echo
+        c->flush();
+        QTRY_VERIFY(link.rttMs() >= 0);
+        QVERIFY(!got.contains(QStringLiteral("ping")));
+        // a command resets the ping clock: no ping right after it
+        rx.clear();
+        QVERIFY(link.sendLine(QStringLiteral("s")));
+        QTest::qWait(120);
+        QCOMPARE(drain(), QByteArray("s\n"));
+        // debug option: ping / pong in the console
+        link.setShowKeepalive(true);
+        c->write("pong\n");
+        c->flush();
+        QTRY_COMPARE(got.last(), QStringLiteral("pong"));
+        QTRY_VERIFY_WITH_TIMEOUT(sent.contains(QStringLiteral("ping")), 2000);
+        link.setShowKeepalive(false);
 
         // the module drops the connection: reconnect by itself
         c->disconnectFromHost();
@@ -1278,17 +1302,31 @@ private slots:
         QVERIFY(link.busy());
         QTRY_VERIFY_WITH_TIMEOUT(srv.hasPendingConnections(), 3000);
         c = srv.nextPendingConnection();
+        rx.clear();
         QTRY_VERIFY(link.connected());
         QVERIFY(link.reconnects() >= 1);
 
-        // silent link (WiFi gone, TCP not told yet): dropped after the timeout, then reconnects
-        link.setSilenceTimeoutMs(300);
-        c->write("x\n");
-        c->flush();
-        QTRY_COMPARE(got.last(), QStringLiteral("x"));
+        // timeout on: a peer that answers the pings keeps the link up ...
+        link.setSilenceTimeoutMs(500);
+        link.setTimeoutEnabled(true);
+        for (int k = 0; k < 15; ++k) {
+            QTest::qWait(100);
+            const QByteArray d = c->readAll();
+            for (int n = d.count("ping\n"); n > 0; --n)
+                c->write("ping\n");
+            c->flush();
+            QVERIFY(link.connected());
+        }
+        // ... a silent one is dropped after the timeout and reconnected
         QTRY_VERIFY_WITH_TIMEOUT(!link.connected(), 2000);
         QVERIFY(link.errorString().contains(QStringLiteral("mất liên lạc")));
         QTRY_VERIFY_WITH_TIMEOUT(srv.hasPendingConnections(), 3000);
+        c = srv.nextPendingConnection();
+        QTRY_VERIFY(link.connected());
+        // timeout off (test with a silent peer): stays connected
+        link.setTimeoutEnabled(false);
+        QTest::qWait(1200);
+        QVERIFY(link.connected());
 
         // Disconnect: no more retries
         link.close();

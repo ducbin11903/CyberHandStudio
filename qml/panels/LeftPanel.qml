@@ -300,6 +300,30 @@ Card {
                             onCommitted: (v) => Core.wifi.port = v
                         }
                     }
+                    FormRow {
+                        visible: root.wifiMode
+                        label: qsTr("Giữ kết nối")
+                        FlatCheck {
+                            text: qsTr("Timeout 3 s")
+                            checked: Core.wifi.timeoutEnabled
+                            onToggled: Core.wifi.timeoutEnabled = checked
+                            Tip { visible: parent.hovered; text: qsTr("Không nhận byte nào trong 3 s → coi là mất liên lạc, ngắt và kết nối lại. Tắt khi test với phía kia im lặng.") }
+                        }
+                        FlatCheck {
+                            text: qsTr("Hiện ping")
+                            checked: Core.wifi.showKeepalive
+                            onToggled: Core.wifi.showKeepalive = checked
+                            Tip { visible: parent.hovered; text: qsTr("App gửi ping mỗi 1 s khi không có lệnh khác; ping/pong mặc định ẩn khỏi Console") }
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    TextLabel {
+                        Layout.fillWidth: true
+                        visible: root.wifiMode && Core.wifi.connected
+                        font.pixelSize: Theme.fontSmall
+                        color: Theme.textSecondary
+                        text: qsTr("RTT %1 · nối lại %2 lần").arg(Core.wifi.rttMs >= 0 ? Core.wifi.rttMs + " ms" : "—").arg(Core.wifi.reconnects)
+                    }
                     TextLabel {
                         Layout.fillWidth: true
                         visible: root.wifiMode

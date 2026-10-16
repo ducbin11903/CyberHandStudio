@@ -83,6 +83,11 @@ Cập nhật: 2026-09-27
 - E-STOP chốt trong firmware: thanh đỏ + Xóa E-STOP, khóa Enable. Thanh duty không bị STATUS kéo lại khi đang kéo.
 - Chờ chốt: frame nhị phân chung (header/độ dài/CRC), heartbeat, UDP stream.
 
+### 0.8.1 — WiFi keep-alive
+
+- `ping\n` mỗi 1 s khi không có lệnh khác; byte bất kỳ nhận về reset timeout 3 s; ping/pong ẩn khỏi Console
+  (tùy chọn "Hiện ping"), RTT; tùy chọn bật/tắt "Timeout 3 s" (lưu trong profile). Bỏ cách tính im lặng theo log rate.
+
 ## Giả định cần Duc xác nhận
 
 - (đã xác nhận) T1 = xoay ngón cái (Thumb Rotation, opposition), T2 = gập ngón cái (Thumb Flexion).

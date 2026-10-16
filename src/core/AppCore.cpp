@@ -214,13 +214,7 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
             m_wifi->close();
         }
     });
-    // WiFi: a link that falls silent is dropped and reconnected, but only while the log runs
-    auto wifiSilence = [this]() {
-        const double hz = m_ctrl->logRate();
-        m_wifi->setSilenceTimeoutMs(hz > 0 ? qMax(3000, int(5000.0 / hz)) : 0);
-    };
-    connect(m_ctrl, &HandController::settingsChanged, this, wifiSilence);
-    wifiSilence();
+
     // updates: console line when a new build is found; silent check shortly after start (release builds)
     connect(m_updater, &Updater::message, this, [this](const QString &t, bool err) {
         err ? m_console->error(t) : m_console->info(t);
@@ -916,7 +910,9 @@ QJsonObject AppCore::collect() const
                                                   {QStringLiteral("mode"), m_ctrl->connectionMode()},
                                                   {QStringLiteral("port2"), m_link2->portName()},
                                                   {QStringLiteral("wifiHost"), m_wifi->host()},
-                                                  {QStringLiteral("wifiPort"), m_wifi->port()}});
+                                                  {QStringLiteral("wifiPort"), m_wifi->port()},
+                                                  {QStringLiteral("wifiTimeout"), m_wifi->timeoutEnabled()},
+                                                  {QStringLiteral("wifiShowPing"), m_wifi->showKeepalive()}});
     const CanConfig cc = m_can->config();
     o.insert(QStringLiteral("can"), QJsonObject{{QStringLiteral("backend"), cc.backend},
                                                  {QStringLiteral("device"), cc.device},
@@ -985,6 +981,8 @@ void AppCore::apply(const QJsonObject &o)
             m_link2->setPortName(port2);
         m_wifi->setHost(link.value(QStringLiteral("wifiHost")).toString(m_wifi->host()));
         m_wifi->setPort(link.value(QStringLiteral("wifiPort")).toInt(m_wifi->port()));
+        m_wifi->setTimeoutEnabled(link.value(QStringLiteral("wifiTimeout")).toBool(true));
+        m_wifi->setShowKeepalive(link.value(QStringLiteral("wifiShowPing")).toBool(false));
         if (link.contains(QStringLiteral("mode")))
             m_ctrl->setConnectionMode(link.value(QStringLiteral("mode")).toInt(0));
         else

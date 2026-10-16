@@ -223,10 +223,13 @@ SoftAP `CyberHand-XXXX`, mật khẩu `cyberhand`, module `192.168.4.1`, TCP por
 - TCP client, `TCP_NODELAY` + keep-alive, dùng như 1 cổng COM: cùng dòng lệnh / log như USB (hiện là CLI text, kết thúc `\n`).
 - TCP là luồng byte: app gom byte vào buffer rồi tách dòng (1 dòng qua nhiều lần recv, nhiều dòng trong 1 lần đều được).
 - Tự kết nối lại mỗi 1 s khi rớt (timeout kết nối 3 s); Disconnect thì dừng hẳn.
-- Mất liên lạc: tạm thời theo im lặng — đang có log mà không nhận byte nào trong max(3 s, 5 chu kỳ log) → bỏ kết nối, nối lại.
-  Log rate = 0 thì tắt kiểm tra này. Khi chốt heartbeat ở tầng giao thức thì thay bằng heartbeat.
+- Keep-alive: đã kết nối mà 1 s chưa gửi lệnh nào thì app gửi `ping\n` (lệnh khác cũng tính là "đã gửi").
+  ESP chế độ echo trả `ping`, MainBoard sau này trả `pong`. Ping/pong ẩn khỏi Console (tick "Hiện ping" để xem), đo RTT.
+- Mất liên lạc: không nhận byte nào (kể cả ping/pong) trong 3 s → ngắt, kết nối lại. Tắt được bằng "Timeout 3 s"
+  khi test với phía kia im lặng. `ping`/`pong` là tạm, đổi khi chốt frame nhị phân.
 - 2 app (2 máy) cùng nối 1 module sẽ giành nhau vì module chỉ nhận 1 client.
-- Chưa làm: frame nhị phân (header, độ dài, CRC) dùng chung cho mọi link, heartbeat, UDP stream lực/trạng thái — chờ chốt.
+- Chưa làm: frame nhị phân (header, độ dài, CRC) dùng chung cho mọi link, UDP stream lực/trạng thái — chờ chốt.
+- fw_sim trả `pong` cho `ping`.
 
 **Thử không cần phần cứng**: `python tools/fw_sim.py --g474 U6 --bridge --tcp 8888` rồi app WiFi `127.0.0.1:8888`
 (fw_sim nhận 1 client như module). Module thật chưa có MainBoard: nối tắt IO17–IO18 → app nhận lại đúng dòng nó gửi.

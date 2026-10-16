@@ -10,8 +10,9 @@
 // WiFi link: TCP client to the ESP32-S2 bridge of the MainBoard (SoftAP CyberHand-XXXX,
 // 192.168.4.1:8888, transparent TCP <-> UART). Used like a COM port: the same text lines.
 // TCP is a byte stream, so lines are rebuilt from whatever recv() hands over (split or merged).
-// Reconnects by itself while it is meant to be open; a link that goes silent is dropped and
-// reconnected (TCP itself may take seconds to notice a lost WiFi).
+// Reconnects by itself while it is meant to be open. Keep-alive: `ping` every second when nothing
+// else went out (the ESP echo / MainBoard answer `ping` / `pong`); no byte back for 3 s -> link lost,
+// dropped and reconnected (TCP itself may take seconds to notice a lost WiFi).
 class TcpLink : public Transport
 {
     Q_OBJECT
@@ -21,6 +22,12 @@ class TcpLink : public Transport
     Q_PROPERTY(QString stateText READ stateText NOTIFY stateChanged)
     Q_PROPERTY(int reconnects READ reconnects NOTIFY statsChanged)
     Q_PROPERTY(int silenceTimeoutMs READ silenceTimeoutMs WRITE setSilenceTimeoutMs NOTIFY settingsChanged)
+    // drop + reconnect after silenceTimeoutMs without a byte (off for tests with a silent peer)
+    Q_PROPERTY(bool timeoutEnabled READ timeoutEnabled WRITE setTimeoutEnabled NOTIFY settingsChanged)
+    // ping / pong in the console (hidden by default)
+    Q_PROPERTY(bool showKeepalive READ showKeepalive WRITE setShowKeepalive NOTIFY settingsChanged)
+    // ping -> ping / pong round trip, ms (-1 = none yet)
+    Q_PROPERTY(int rttMs READ rttMs NOTIFY statsChanged)
 
 public:
     explicit TcpLink(QObject *parent = nullptr);
@@ -43,11 +50,19 @@ public:
     bool busy() const { return m_wanted && !m_connected; }
     QString stateText() const;
     int reconnects() const { return m_reconnects; }
-    // no byte for this long while lines were coming in -> drop and reconnect (0 = off)
+    // no byte for this long -> drop and reconnect (when timeoutEnabled)
     int silenceTimeoutMs() const { return m_silenceMs; }
     void setSilenceTimeoutMs(int ms);
+    bool timeoutEnabled() const { return m_timeoutOn; }
+    void setTimeoutEnabled(bool on);
+    bool showKeepalive() const { return m_showKeepalive; }
+    void setShowKeepalive(bool on);
+    int rttMs() const { return m_rtt; }
+    // the keep-alive line is a plain `ping` for now (until the binary frame is fixed)
+    static bool isKeepalive(const QString &line) { return line == QLatin1String("ping") || line == QLatin1String("pong"); }
     // tests
     void setRetryIntervalMs(int ms) { m_retryMs = ms; }
+    void setPingIntervalMs(int ms) { m_pingMs = ms; }
     bool noDelay() const { return m_sock->socketOption(QAbstractSocket::LowDelayOption).toInt() == 1; }
 
     bool open() override;
@@ -67,15 +82,21 @@ private:
     void setConnected(bool c);
     void setError(const QString &e);
     void updateStats();
-    void checkSilence();
+    void tick();
+    void sendPing();
 
     QTcpSocket *m_sock;
     QString m_host = QStringLiteral("192.168.4.1");
     int m_port = 8888;
     bool m_wanted = false;
     bool m_connected = false;
-    bool m_gotData = false;
     bool m_dropping = false;
+    bool m_timeoutOn = true;
+    bool m_showKeepalive = false;
+    int m_pingMs = 1000;
+    int m_rtt = -1;
+    QElapsedTimer m_lastTx;
+    QElapsedTimer m_pingSent;
     int m_retryMs = 1000;
     int m_silenceMs = 3000;
     int m_reconnects = 0;
