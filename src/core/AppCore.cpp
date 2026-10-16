@@ -27,8 +27,10 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_ctrl = new HandController(m_link, m_console, m_hand, this);
     m_ctrl->addLink(m_link2);
     m_can = new CanBus(this);
+    m_wifi = new TcpLink(this);
     m_updater = new Updater(this);
     m_ctrl->setCan(m_can);
+    m_ctrl->setWifi(m_wifi);
     m_live = new LiveSeries(this);
     m_streamSeries = new LiveSeries(this);
     m_streamSeries->setCapacity(6000);
@@ -55,11 +57,15 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
     m_config->setCollector([this]() { return collect(); });
     m_config->setApplier([this](const QJsonObject &o) { apply(o); });
 
-    // transports -> parser -> telemetry / console: port i = serial link i, or CAN node i + 1
+    // transports -> parser -> telemetry / console: port i = serial link i, CAN node i + 1,
+    // or (port 0) the WiFi link; kind 0 serial / 1 CAN / 2 WiFi
     for (int i = 0; i < 2; ++i) {
-        const bool canSide[] = {false, true};
-        for (bool isCan : canSide) {
-            Transport *l = isCan ? static_cast<Transport *>(m_can->node(i + 1)) : (i ? m_link2 : m_link);
+        for (int kind = 0; kind < 3; ++kind) {
+            if (kind == 2 && i > 0)
+                continue;
+            const bool isCan = kind == 1;
+            Transport *l = kind == 2 ? static_cast<Transport *>(m_wifi)
+                         : isCan ? static_cast<Transport *>(m_can->node(i + 1)) : (i ? m_link2 : m_link);
             connect(l, &Transport::lineReceived, this, [this, i](const QString &line, double) { onLine(i, line); });
             connect(l, &Transport::lineSent, this, [this, i](const QString &line, bool quiet) {
                 m_console->onSent(line, quiet, txTag(i));
@@ -67,8 +73,9 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
                 if (line == QLatin1String("e") || line.startsWith(QLatin1String("e ")))
                     m_board->onEnableSent();
             });
-            connect(l, &Transport::connectedChanged, this, [this, i, isCan]() {
-                if (m_ctrl->useCan() == isCan)
+            connect(l, &Transport::connectedChanged, this, [this, i, kind]() {
+                const int active = m_ctrl->useCan() ? 1 : (m_ctrl->useWifi() ? 2 : 0);
+                if (active == kind)
                     onPortConnection(i);
             });
             if (!isCan)
@@ -204,8 +211,16 @@ AppCore::AppCore(const QString &configDir, QObject *parent)
             m_link->close();
             m_link2->close();
             m_can->close();
+            m_wifi->close();
         }
     });
+    // WiFi: a link that falls silent is dropped and reconnected, but only while the log runs
+    auto wifiSilence = [this]() {
+        const double hz = m_ctrl->logRate();
+        m_wifi->setSilenceTimeoutMs(hz > 0 ? qMax(3000, int(5000.0 / hz)) : 0);
+    };
+    connect(m_ctrl, &HandController::settingsChanged, this, wifiSilence);
+    wifiSilence();
     // updates: console line when a new build is found; silent check shortly after start (release builds)
     connect(m_updater, &Updater::message, this, [this](const QString &t, bool err) {
         err ? m_console->error(t) : m_console->info(t);
@@ -234,6 +249,7 @@ void AppCore::registerQmlTypes()
     qmlRegisterUncreatableType<CanBus>(uri, 1, 0, "CanBus", why);
     qmlRegisterUncreatableType<CanFrameLog>(uri, 1, 0, "CanFrameLog", why);
     qmlRegisterUncreatableType<Updater>(uri, 1, 0, "Updater", why);
+    qmlRegisterUncreatableType<TcpLink>(uri, 1, 0, "TcpLink", why);
     qmlRegisterUncreatableType<ConsoleModel>(uri, 1, 0, "ConsoleModel", why);
     qmlRegisterUncreatableType<HandModel>(uri, 1, 0, "HandModel", why);
     qmlRegisterUncreatableType<Joint>(uri, 1, 0, "Joint", why);
@@ -289,7 +305,8 @@ void AppCore::onPortConnection(int port)
         }
         const auto *serial = qobject_cast<SerialLink *>(l);
         m_console->info(serial ? tr("Đã kết nối %1 @ %2").arg(l->portName()).arg(serial->baudRate())
-                               : tr("Đã kết nối %1").arg(l->portName()));
+                               : (l->kind() == QLatin1String("wifi") ? tr("Đã kết nối WiFi %1").arg(l->portName())
+                                                                     : tr("Đã kết nối %1").arg(l->portName())));
         if (l->kind() == QLatin1String("can")) {
             // CAN: who are you, STATUS at 50 Hz; the node answers with its ID line
             m_ctrl->sendTo(port, QStringLiteral("i"));
@@ -318,17 +335,20 @@ void AppCore::onPortConnection(int port)
 
 bool AppCore::toggleConnection()
 {
-    if (m_ctrl->connected() || m_can->busy()) {
+    if (m_ctrl->connected() || m_can->busy() || m_wifi->busy()) {
         // Disconnect: stop what is streaming and bring every motor to duty 0 first
         m_player->pause();
         m_ctrl->stopAll();
         m_link->close();
         m_link2->close();
         m_can->close();
+        m_wifi->close();
         return false;
     }
     if (m_ctrl->useCan())
         return m_can->open();
+    if (m_ctrl->useWifi())
+        return m_wifi->open();
     bool ok = m_link->open();
     if (m_ctrl->dualPort()) {
         if (m_link2->portName().isEmpty()) {
@@ -357,6 +377,20 @@ void AppCore::estop()
     } else {
         m_console->error(tr("E-STOP: chưa kết nối"));
     }
+}
+
+void AppCore::openWifiAtStart(const QString &spec)
+{
+    const QString s = spec.trimmed();
+    const int colon = s.lastIndexOf(QLatin1Char(':'));
+    if (colon > 0) {
+        m_wifi->setHost(s.left(colon));
+        m_wifi->setPort(s.mid(colon + 1).toInt());
+    } else if (!s.isEmpty()) {
+        m_wifi->setHost(s);
+    }
+    m_ctrl->setConnectionMode(3);
+    m_wifi->open();
 }
 
 void AppCore::openCanAtStart(const QString &spec)
@@ -880,7 +914,9 @@ QJsonObject AppCore::collect() const
                                                   {QStringLiteral("lineEnding"), m_link->lineEnding()},
                                                   {QStringLiteral("dual"), m_ctrl->dualPort()},
                                                   {QStringLiteral("mode"), m_ctrl->connectionMode()},
-                                                  {QStringLiteral("port2"), m_link2->portName()}});
+                                                  {QStringLiteral("port2"), m_link2->portName()},
+                                                  {QStringLiteral("wifiHost"), m_wifi->host()},
+                                                  {QStringLiteral("wifiPort"), m_wifi->port()}});
     const CanConfig cc = m_can->config();
     o.insert(QStringLiteral("can"), QJsonObject{{QStringLiteral("backend"), cc.backend},
                                                  {QStringLiteral("device"), cc.device},
@@ -947,6 +983,8 @@ void AppCore::apply(const QJsonObject &o)
         const QString port2 = link.value(QStringLiteral("port2")).toString();
         if (!port2.isEmpty())
             m_link2->setPortName(port2);
+        m_wifi->setHost(link.value(QStringLiteral("wifiHost")).toString(m_wifi->host()));
+        m_wifi->setPort(link.value(QStringLiteral("wifiPort")).toInt(m_wifi->port()));
         if (link.contains(QStringLiteral("mode")))
             m_ctrl->setConnectionMode(link.value(QStringLiteral("mode")).toInt(0));
         else

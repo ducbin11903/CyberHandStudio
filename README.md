@@ -18,7 +18,7 @@ Thư mục app phải ghi được (đừng giải nén vào Program Files).
 
 | Khu | Nội dung |
 |---|---|
-| Bảng trái | Communication (1 cổng / 2 cổng / CAN, COM, baud, adapter CAN, giao thức), Control (send rate, speed %, log rate, soft start/stop, giới hạn dòng), Motor (Enable/Disable/Home/Zero/Clear, góc khớp, duty, tốc độ, PID), Poses, Joints (cnt/90°, min/max), Macros, Visual |
+| Bảng trái | Communication (1 cổng / 2 cổng / CAN / WiFi, COM, baud, adapter CAN, địa chỉ module WiFi, giao thức), Control (send rate, speed %, log rate, soft start/stop, giới hạn dòng), Motor (Enable/Disable/Home/Zero/Clear, góc khớp, duty, tốc độ, PID), Poses, Joints (cnt/90°, min/max), Macros, Visual |
 | 3D | Bàn tay 6 khớp T2 T1 I M R P, khối đặc = đo được, bóng xanh = đích |
 | Status | Driver, mode, homed, vị trí/đích/sai lệch, duty, tốc độ, lỗi DIAG/Quá dòng/KEY, current monitor (actual/peak/ngưỡng) |
 | Text | Nạp CSV quỹ đạo, vẽ theo khớp, phát (Once/Loop/Bounce, tốc độ), AI tạo quỹ đạo từ mô tả |
@@ -38,6 +38,8 @@ Mọi thao tác quy về lệnh CLI hiện có của firmware (`e d x o g p t v 
 - Board MCB 2 MCU: `--g474 U6` và `--g474 U7` (2 tiến trình → app chế độ "2 cổng"), hoặc `--g474 U6 --bridge`
   (fw 0.8, 1 cổng điều khiển cả 6 khớp qua link UART). Cảm biến bo mạch (fw 0.9): `--temp`, `--vbat`, lệnh
   `simtemp <C>` / `simvbat <V>` / `simsht off|on`. Xem docs/PROTOCOL.md.
+- WiFi (TCP): `python tools/fw_sim.py --g474 U6 --bridge --tcp 8888`, app: Kết nối → WiFi → `127.0.0.1` : `8888` → Connect.
+  Module thật: vào WiFi `CyberHand-XXXX` (mật khẩu `cyberhand`), địa chỉ `192.168.4.1` : `8888`.
 - CAN (fw 0.11): `python tools/fw_sim.py --can-udp 7470`, app: Communication → Kết nối → CAN → adapter "Ảo (UDP)" → Connect.
   Adapter thật Waveshare USB-CAN-FD: `ControlCANFD.dll` đã kèm trong bản build.
 - Stream: `python tools/stream_demo.py` rồi vào Stream → Start.

@@ -25,6 +25,9 @@
 #include "core/TimelineModel.h"
 #include "core/Trajectory.h"
 #include "core/Updater.h"
+#include "core/TcpLink.h"
+#include <QTcpServer>
+#include <QTcpSocket>
 
 class TstCore : public QObject
 {
@@ -1232,6 +1235,77 @@ private slots:
         QCOMPARE(sentAs(0x200), QStringList{QStringLiteral("D")});
         QVERIFY(!ctrl->connected());
         QVERIFY(!bus->connected());
+    }
+
+    void wifiTcpLink()
+    {
+        QTcpServer srv;
+        QVERIFY(srv.listen(QHostAddress::LocalHost));
+        TcpLink link;
+        link.setHost(QStringLiteral("127.0.0.1"));
+        link.setPort(srv.serverPort());
+        link.setRetryIntervalMs(100);
+        link.setSilenceTimeoutMs(0);
+        QStringList got;
+        connect(&link, &Transport::lineReceived, this, [&got](const QString &l, double) { got << l; });
+        QVERIFY(link.open());
+        QVERIFY(link.busy());
+        QTRY_VERIFY(srv.hasPendingConnections());
+        QTcpSocket *c = srv.nextPendingConnection();
+        QTRY_VERIFY(link.connected());
+        QVERIFY(link.noDelay());
+        QCOMPARE(link.kind(), QStringLiteral("wifi"));
+
+        // TCP is a byte stream: a line split over several recv(), several lines in one
+        c->write("ID: Cyber");
+        c->flush();
+        QTest::qWait(40);
+        c->write("Hand-G474 fw 0.11\nOK e");
+        c->flush();
+        QTest::qWait(40);
+        c->write(" all\r\nen:1,duty:0\n");
+        c->flush();
+        QTRY_COMPARE(got.size(), 3);
+        QCOMPARE(got, (QStringList{QStringLiteral("ID: CyberHand-G474 fw 0.11"), QStringLiteral("OK e all"),
+                                   QStringLiteral("en:1,duty:0")}));
+        QVERIFY(link.sendLine(QStringLiteral("e")));
+        QTRY_VERIFY(c->bytesAvailable() >= 2);
+        QCOMPARE(c->readAll(), QByteArray("e\n"));
+
+        // the module drops the connection: reconnect by itself
+        c->disconnectFromHost();
+        QTRY_VERIFY(!link.connected());
+        QVERIFY(link.busy());
+        QTRY_VERIFY_WITH_TIMEOUT(srv.hasPendingConnections(), 3000);
+        c = srv.nextPendingConnection();
+        QTRY_VERIFY(link.connected());
+        QVERIFY(link.reconnects() >= 1);
+
+        // silent link (WiFi gone, TCP not told yet): dropped after the timeout, then reconnects
+        link.setSilenceTimeoutMs(300);
+        c->write("x\n");
+        c->flush();
+        QTRY_COMPARE(got.last(), QStringLiteral("x"));
+        QTRY_VERIFY_WITH_TIMEOUT(!link.connected(), 2000);
+        QVERIFY(link.errorString().contains(QStringLiteral("mất liên lạc")));
+        QTRY_VERIFY_WITH_TIMEOUT(srv.hasPendingConnections(), 3000);
+
+        // Disconnect: no more retries
+        link.close();
+        QVERIFY(!link.connected());
+        QVERIFY(!link.busy());
+        while (srv.hasPendingConnections())
+            delete srv.nextPendingConnection();
+        QTest::qWait(300);
+        QVERIFY(!srv.hasPendingConnections());
+
+        // the app: mode WiFi puts the TCP link on port 0
+        QTemporaryDir dir;
+        AppCore core(dir.path());
+        core.ctrl()->setConnectionMode(3);
+        QCOMPARE(core.ctrl()->linkAt(0), static_cast<Transport *>(core.wifi()));
+        core.ctrl()->setConnectionMode(0);
+        QCOMPARE(core.ctrl()->linkAt(0), static_cast<Transport *>(core.link()));
     }
 
     void estopLatch()

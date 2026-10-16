@@ -20,6 +20,8 @@ Options: --joints 6 to emulate the proposed 6-joint log (q1..q6, t1..t6, i1..i6)
          bridges the other one (keys = all 6, link=U7, text of U7 prefixed "[U7] ",
          @U7 <line> raw, `link on|off` to simulate losing the link, log + lk:1).
 Two ports (app mode "2 cổng"): run two sims, --g474 U6 and --g474 U7.
+WiFi (app mode "WiFi"): --tcp 8888 serves the chosen firmware (any of the options above) over TCP,
+         one client like the ESP32-S2 bridge; the app connects to 127.0.0.1:8888.
 CAN (app mode "CAN", adapter "Virtual (UDP)"): --can-udp 7470 runs both MCUs as CAN nodes
          (fw 0.11-g474, protocol CAN v1 in docs/PROTOCOL.md): TEXT 0x280+n, STATUS 0x300+n at
          `canlog <hz>`, POS_ALL, E-STOP, HOST_HB watchdog; sim command `simdrop <n>` skips STATUS seq.
@@ -1054,6 +1056,9 @@ def main():
     ap.add_argument("--can-udp", type=int, metavar="PORT",
                     help="MCB fw 0.11 on CAN FD v1: both MCUs (node 1 U6, node 2 U7) on a UDP virtual bus")
     ap.add_argument("--can-host", default="127.0.0.1", help="with --can-udp: address to listen on")
+    ap.add_argument("--tcp", type=int, metavar="PORT",
+                    help="serve this firmware over TCP like the MainBoard WiFi bridge (app: Kết nối -> WiFi, 127.0.0.1:PORT)")
+    ap.add_argument("--tcp-host", default="127.0.0.1", help="with --tcp: address to listen on (0.0.0.0 = every interface)")
     a = ap.parse_args()
 
     if a.can_udp:
@@ -1065,6 +1070,47 @@ def main():
         read = lambda: ser.read(4096)
         write_raw = lambda b: ser.write(b)
         print("fw_sim on %s" % a.port, flush=True)
+    elif a.tcp:
+        import socket
+        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        srv.bind((a.tcp_host, a.tcp))
+        srv.listen(1)
+        srv.setblocking(False)
+        client = [None]   # one client, a new connection replaces the old one (like the ESP32 bridge)
+        print("TCP %s:%d" % (a.tcp_host, a.tcp), flush=True)
+
+        def read():
+            try:
+                c, _ = srv.accept()
+                c.setblocking(False)
+                c.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                if client[0] is not None:
+                    client[0].close()
+                client[0] = c
+            except (BlockingIOError, OSError):
+                pass
+            if client[0] is None:
+                return b""
+            try:
+                d = client[0].recv(4096)
+                if d == b"":
+                    client[0].close()
+                    client[0] = None
+                return d
+            except BlockingIOError:
+                return b""
+            except OSError:
+                client[0] = None
+                return b""
+
+        def write_raw(b):
+            if client[0] is None:
+                return
+            try:
+                client[0].sendall(b)
+            except (BlockingIOError, OSError):
+                pass
     else:
         import pty
         import tty

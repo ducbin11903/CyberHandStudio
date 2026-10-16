@@ -62,6 +62,9 @@ public:
     void addLink(Transport *link);
     // CAN bus: in CAN mode its node 1 / node 2 links take the place of port 1 / port 2
     void setCan(CanBus *bus);
+    // WiFi (TCP to the MainBoard bridge): connection mode 3, port 0
+    void setWifi(Transport *link);
+    bool useWifi() const { return m_mode == 3; }
     CanBus *can() const { return m_can; }
     bool useCan() const { return m_mode == 2; }
     Q_INVOKABLE Transport *linkAt(int port) const;
@@ -241,6 +244,7 @@ private:
     QVector<double> m_lastSent;
     int m_mode = 0;
     Transport *m_serial[2] = {nullptr, nullptr};
+    Transport *m_wifi = nullptr;
     CanBus *m_can = nullptr;
     // CAN: joint targets as one POS_ALL frame (NaN = keep)
     bool sendPosAll(const QVector<double> &deg, bool quiet);

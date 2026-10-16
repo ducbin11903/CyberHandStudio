@@ -51,6 +51,7 @@ int main(int argc, char *argv[])
     args.addVersionOption();
     QCommandLineOption portOpt(QStringLiteral("port"), QStringLiteral("Open this serial port at start"), QStringLiteral("name"));
     QCommandLineOption port2Opt(QStringLiteral("port2"), QStringLiteral("2-port mode: open this serial port as port 2"), QStringLiteral("name"));
+    QCommandLineOption wifiOpt(QStringLiteral("wifi"), QStringLiteral("WiFi mode: open TCP host[:port] at start (MainBoard ESP32 bridge 192.168.4.1:8888, or fw_sim --tcp)"), QStringLiteral("host"));
     QCommandLineOption canOpt(QStringLiteral("can"), QStringLiteral("CAN mode: open udp[:port] (fw_sim --can-udp) or waveshare[:device] at start"), QStringLiteral("spec"));
     QCommandLineOption baudOpt(QStringLiteral("baud"), QStringLiteral("Baud rate"), QStringLiteral("rate"), QStringLiteral("115200"));
     QCommandLineOption configDirOpt(QStringLiteral("config-dir"), QStringLiteral("Folder for config profiles"), QStringLiteral("dir"));
@@ -65,7 +66,7 @@ int main(int argc, char *argv[])
     QCommandLineOption updateFailedOpt(QStringLiteral("update-failed"), QStringLiteral("Started by the updater after a failed update"));
     QCommandLineOption checkUpdateOpt(QStringLiteral("check-update"), QStringLiteral("Check GitHub for a newer build, print the result and exit (0 = checked)"));
     QCommandLineOption installUpdateOpt(QStringLiteral("install-update"), QStringLiteral("Install this CyberHandStudio-win64.zip over the app folder and restart (Windows)"), QStringLiteral("zip"));
-    args.addOptions({portOpt, port2Opt, canOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt,
+    args.addOptions({portOpt, port2Opt, canOpt, wifiOpt, baudOpt, configDirOpt, modeOpt, shotOpt, shotDelayOpt, scriptOpt, playOpt, evalOpt,
                      updatedOpt, updateFailedOpt, installUpdateOpt, checkUpdateOpt});
     args.process(app);
 
@@ -113,6 +114,8 @@ int main(int argc, char *argv[])
         core.openPort2AtStart(args.value(port2Opt));
     if (args.isSet(canOpt))
         core.openCanAtStart(args.value(canOpt));
+    if (args.isSet(wifiOpt))
+        core.openWifiAtStart(args.value(wifiOpt));
     if (args.isSet(scriptOpt)) {
         QString text = args.value(scriptOpt);
         text.replace(QLatin1Char(';'), QLatin1Char('\n'));

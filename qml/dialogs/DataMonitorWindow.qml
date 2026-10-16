@@ -18,7 +18,7 @@ ToolWindow {
     QtObject {
         id: dm
         readonly property bool can: Core.ctrl.connectionMode === 2
-        readonly property var l1: can ? Core.can.node1 : Core.link
+        readonly property var l1: can ? Core.can.node1 : (Core.ctrl.connectionMode === 3 ? Core.wifi : Core.link)
         readonly property var l2: can ? Core.can.node2 : Core.link2
     }
 
@@ -105,7 +105,8 @@ ToolWindow {
                         if (p[i].open) l.push(p[i].name + (p[i].mcu.length ? " (" + p[i].mcu + ")" : ""))
                     if (!l.length)
                         return "—"
-                    return l.join(" + ") + (dm.can ? " · " + Core.can.description : " @ " + Core.link.baudRate)
+                    return l.join(" + ") + (dm.can ? " · " + Core.can.description
+                                                   : (Core.ctrl.connectionMode === 3 ? " · WiFi TCP" : " @ " + Core.link.baudRate))
                 }
             }
             Stat { title: qsTr("Log"); value: Core.telemetry.sampleRate.toFixed(0) + " Hz" }

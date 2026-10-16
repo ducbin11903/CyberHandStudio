@@ -34,7 +34,7 @@ Card {
         id: ps
         property int port: 0
         readonly property var link: Core.ctrl.connectionMode === 2 ? (port === 0 ? Core.can.node1 : Core.can.node2)
-                                                                   : (port === 0 ? Core.link : Core.link2)
+                                  : (Core.ctrl.connectionMode === 3 ? Core.wifi : (port === 0 ? Core.link : Core.link2))
         readonly property var info: Core.ctrl.ports[port] || ({})
         readonly property var keys: info.keys || []
         readonly property bool peerLost: (info.peer || "").length > 0 && info.peerUp === 0
@@ -61,7 +61,8 @@ Card {
                 text: {
                     if (!ps.link.connected)
                         return ps.link.errorString.length ? ps.link.errorString
-                             : (Core.can.busy ? qsTr("Đang mở adapter…") : qsTr("Chưa kết nối"))
+                             : (Core.can.busy ? qsTr("Đang mở adapter…")
+                                : (Core.ctrl.connectionMode === 3 && Core.wifi.busy ? Core.wifi.stateText : qsTr("Chưa kết nối")))
                     var age = ps.link.lastLineAgeMs
                     return (Core.ctrl.openPorts > 1 ? ps.link.portName + " · " : "")
                         + qsTr("RX %1 B/s · %2 dòng/s · dòng cuối %3")
@@ -92,6 +93,8 @@ Card {
     }
 
     readonly property bool canMode: Core.ctrl.connectionMode === 2
+    readonly property bool wifiMode: Core.ctrl.connectionMode === 3
+    readonly property bool linkBusy: Core.can.busy || Core.wifi.busy
 
     TextPrompt { id: prompt }
     FolderDialog {
@@ -148,8 +151,8 @@ Card {
             Item { Layout.preferredWidth: 4 }
             FlatButton {
                 Layout.preferredWidth: 104
-                accent: !Core.ctrl.connected && !Core.can.busy
-                text: Core.ctrl.connected || Core.can.busy ? qsTr("Disconnect") : qsTr("Connect")
+                accent: !Core.ctrl.connected && !root.linkBusy
+                text: Core.ctrl.connected || root.linkBusy ? qsTr("Disconnect") : qsTr("Connect")
                 iconPath: Icons.plug
                 onClicked: Core.toggleConnection()
             }
@@ -186,9 +189,9 @@ Card {
                     FormRow {
                         label: qsTr("Kết nối")
                         SegmentToggle {
-                            options: [qsTr("1 cổng"), qsTr("2 cổng · U6 + U7"), qsTr("CAN")]
+                            options: [qsTr("1 cổng"), qsTr("2 cổng · U6 + U7"), qsTr("CAN"), qsTr("WiFi")]
                             currentIndex: Core.ctrl.connectionMode
-                            enabled: !Core.ctrl.connected && !Core.can.busy
+                            enabled: !Core.ctrl.connected && !root.linkBusy
                             opacity: enabled ? 1 : 0.5
                             onActivated: (i) => Core.ctrl.connectionMode = i
                         }
@@ -280,8 +283,34 @@ Card {
                             font.pixelSize: Theme.fontTiny
                         }
                     }
+                    // ---- WiFi: TCP to the MainBoard ESP32-S2 bridge ----
                     FormRow {
-                        visible: !root.canMode
+                        visible: root.wifiMode
+                        enabled: !Core.wifi.connected && !Core.wifi.busy
+                        label: qsTr("Module WiFi")
+                        FlatField {
+                            Layout.fillWidth: true
+                            text: Core.wifi.host
+                            onEditingFinished: Core.wifi.host = text.trim()
+                        }
+                        TextLabel { text: ":"; secondary: true }
+                        NumberField {
+                            Layout.preferredWidth: 70
+                            value: Core.wifi.port; decimals: 0; from: 1; to: 65535
+                            onCommitted: (v) => Core.wifi.port = v
+                        }
+                    }
+                    TextLabel {
+                        Layout.fillWidth: true
+                        visible: root.wifiMode
+                        text: qsTr("Vào WiFi CyberHand-XXXX (mật khẩu cyberhand) trước; card WiFi đó mất internet. Tự kết nối lại khi rớt mạng.")
+                        muted: true
+                        wrapMode: Text.WordWrap
+                        elide: Text.ElideNone
+                        font.pixelSize: Theme.fontTiny
+                    }
+                    FormRow {
+                        visible: !root.canMode && !root.wifiMode
                         label: Core.ctrl.dualPort ? qsTr("Cổng 1") : qsTr("COM Port")
                         PortCombo { link: Core.link }
                         IconButton { iconPath: Icons.refresh; tip: qsTr("Quét lại cổng"); onClicked: { Core.link.refreshPorts(); Core.link2.refreshPorts() } }
@@ -293,7 +322,7 @@ Card {
                         Item { implicitWidth: 24 }
                     }
                     FormRow {
-                        visible: !root.canMode
+                        visible: !root.canMode && !root.wifiMode
                         label: qsTr("Baud")
                         FlatCombo {
                             id: baudCombo
@@ -306,7 +335,7 @@ Card {
                         }
                     }
                     FormRow {
-                        visible: !root.canMode
+                        visible: !root.canMode && !root.wifiMode
                         label: qsTr("Line ending")
                         FlatCombo {
                             Layout.fillWidth: true
@@ -343,7 +372,7 @@ Card {
                         }
                     }
                     Repeater {
-                        model: Core.ctrl.connectionMode >= 1 ? 2 : 1
+                        model: Core.ctrl.connectionMode === 1 || Core.ctrl.connectionMode === 2 ? 2 : 1
                         PortStatus { port: index }
                     }
                     // CAN: frame rates, STATUS frames lost (by seq), controller error state

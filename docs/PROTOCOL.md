@@ -213,6 +213,24 @@ Khung FD chỉ có độ dài 0–8, 12, 16, 20, 24, 32, 48, 64: phần thiếu 
 `"CF"` u8 flags (b0 FD, b1 BRS, b2 EXT) u8 len u32 id (LE) data[len]. Sim học địa chỉ app từ datagram đầu tiên;
 lệnh thử `simdrop <n>` làm STATUS kế tiếp nhảy seq n (kiểm tra bộ đếm mất khung).
 
+## WiFi (MainBoard, ESP32-S2 bridge)
+
+ESP32-S2-WROOM-1 trên MainBoard là cầu nối trong suốt TCP ↔ UART (921600) tới MCU3: byte nào đi byte đó.
+SoftAP `CyberHand-XXXX`, mật khẩu `cyberhand`, module `192.168.4.1`, TCP port `8888`, 1 client (kết nối mới thay kết nối cũ),
+~90 KB/s mỗi chiều. PC vào WiFi này thì card WiFi đó mất internet.
+
+**App** — Communication → Kết nối → **WiFi** (hoặc `CyberHandStudio --wifi 192.168.4.1:8888`)
+- TCP client, `TCP_NODELAY` + keep-alive, dùng như 1 cổng COM: cùng dòng lệnh / log như USB (hiện là CLI text, kết thúc `\n`).
+- TCP là luồng byte: app gom byte vào buffer rồi tách dòng (1 dòng qua nhiều lần recv, nhiều dòng trong 1 lần đều được).
+- Tự kết nối lại mỗi 1 s khi rớt (timeout kết nối 3 s); Disconnect thì dừng hẳn.
+- Mất liên lạc: tạm thời theo im lặng — đang có log mà không nhận byte nào trong max(3 s, 5 chu kỳ log) → bỏ kết nối, nối lại.
+  Log rate = 0 thì tắt kiểm tra này. Khi chốt heartbeat ở tầng giao thức thì thay bằng heartbeat.
+- 2 app (2 máy) cùng nối 1 module sẽ giành nhau vì module chỉ nhận 1 client.
+- Chưa làm: frame nhị phân (header, độ dài, CRC) dùng chung cho mọi link, heartbeat, UDP stream lực/trạng thái — chờ chốt.
+
+**Thử không cần phần cứng**: `python tools/fw_sim.py --g474 U6 --bridge --tcp 8888` rồi app WiFi `127.0.0.1:8888`
+(fw_sim nhận 1 client như module). Module thật chưa có MainBoard: nối tắt IO17–IO18 → app nhận lại đúng dòng nó gửi.
+
 ## CSV quỹ đạo (chế độ Text)
 
 ```

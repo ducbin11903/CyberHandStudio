@@ -39,7 +39,7 @@ void HandController::addLink(Transport *link)
     m_ports.append(p);
     m_serial[idx] = link;
     connect(link, &Transport::connectedChanged, this, [this, idx]() {
-        if (!useCan())
+        if (m_mode <= 1)
             onLinkConnection(idx);
     });
     connect(link, &Transport::portNameChanged, this, &HandController::portChanged);
@@ -58,15 +58,32 @@ void HandController::setCan(CanBus *bus)
     }
 }
 
+void HandController::setWifi(Transport *link)
+{
+    m_wifi = link;
+    connect(link, &Transport::connectedChanged, this, [this]() {
+        if (useWifi())
+            onLinkConnection(0);
+    });
+    connect(link, &Transport::portNameChanged, this, &HandController::portChanged);
+}
+
 void HandController::setConnectionMode(int m)
 {
-    m = qBound(0, m, m_can ? 2 : 1);
+    m = qBound(0, m, 3);
+    if ((m == 2 && !m_can) || (m == 3 && !m_wifi))
+        return;
     if (m == m_mode || connected())
         return;
     m_mode = m;
     for (int i = 0; i < m_ports.size() && i < 2; ++i) {
         clearPortInfo(i);
-        m_ports[i].link = (m == 2 && m_can) ? static_cast<Transport *>(m_can->node(i + 1)) : m_serial[i];
+        Transport *l = m_serial[i];
+        if (m == 2)
+            l = m_can->node(i + 1);
+        else if (m == 3 && i == 0)
+            l = m_wifi; // WiFi: one link, like one COM port
+        m_ports[i].link = l;
     }
     resetStreamState();
     updateJointFlags();

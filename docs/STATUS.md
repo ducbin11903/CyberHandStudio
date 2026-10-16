@@ -75,6 +75,14 @@ Cập nhật: 2026-09-27
 - CI: `-DCH_BUILD_NUMBER/-DCH_COMMIT`, `tools/make_version_json.py`, bước thử: bản copy tự cài zip mới rồi mở lại.
 - Bản tự build (build 0) không tự cập nhật.
 
+### 0.8.0 — WiFi (TCP tới module ESP32-S2 của MainBoard)
+
+- Kết nối thứ 4 "WiFi": TcpLink (TCP client 192.168.4.1:8888, NODELAY, gom byte → dòng, tự nối lại 1 s, timeout 3 s,
+  bỏ kết nối khi im lặng quá max(3 s, 5 chu kỳ log)), dùng như 1 cổng COM với giao thức text hiện tại.
+- `--wifi host[:port]`, lưu host/port trong profile; fw_sim `--tcp <port>`.
+- E-STOP chốt trong firmware: thanh đỏ + Xóa E-STOP, khóa Enable. Thanh duty không bị STATUS kéo lại khi đang kéo.
+- Chờ chốt: frame nhị phân chung (header/độ dài/CRC), heartbeat, UDP stream.
+
 ## Giả định cần Duc xác nhận
 
 - (đã xác nhận) T1 = xoay ngón cái (Thumb Rotation, opposition), T2 = gập ngón cái (Thumb Flexion).
